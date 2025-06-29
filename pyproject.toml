@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "findee"
+version = "0.0.1"
+description = "An autonomous vehicle platform by Pathfinder"
+authors = [
+  { name="Pathfinder", email="finder1028@gmail.com" }
+]
+readme = "README.md"
+keywords = ["pathfinder", "finder", "findee"]
+requires-python = ">=3.7"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
+]
+license = { file = "LICENSE" }
+
+[project.urls]
+"Homepage" = "https://github.com/Comrid/findee"
+"Bug Tracker" = "https://github.com/Comrid/findee/issues"
