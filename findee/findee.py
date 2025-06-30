@@ -1,9 +1,9 @@
-import RPi.GPIO as GPIO
+import RPi.GPIO as GPIO # pip install RPi.GPIO
 import subprocess
 import time
-from picamera2 import Picamera2
+from picamera2 import Picamera2 # pip install picamera2
 import threading
-import cv2
+import cv2 # pip install opencv-python
 import multiprocessing as mp
 
 

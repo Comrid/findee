@@ -4,21 +4,40 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "findee"
-version = "0.0.3"
+dynamic = ["version"]
 description = "An autonomous vehicle platform by Pathfinder"
 authors = [
   { name="Pathfinder", email="finder1028@gmail.com" }
 ]
 readme = "README.md"
-keywords = ["pathfinder", "finder", "findee"]
+keywords = ["pathfinder", "finder", "findee", "raspberry-pi", "robotics", "autonomous-vehicle", "gpio"]
 requires-python = ">=3.7"
+dependencies = [
+    "RPi.GPIO>=0.7.0",
+    "picamera2>=0.3.0",
+    "opencv-python>=4.5.0",
+]
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Education",
+  "Topic :: Scientific/Engineering",
+  "Topic :: System :: Hardware",
   "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.7",
+  "Programming Language :: Python :: 3.8",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "License :: OSI Approved :: MIT License",
-  "Operating System :: OS Independent"
+  "Operating System :: POSIX :: Linux",
 ]
 license = { file = "LICENSE" }
 
 [project.urls]
 "Homepage" = "https://github.com/Comrid/findee"
 "Bug Tracker" = "https://github.com/Comrid/findee/issues"
+
+[tool.setuptools.dynamic]
+readme = {file = ["README.md"], content-type = "text/markdown"}
+version = {attr = "findee._version.__version__"}
