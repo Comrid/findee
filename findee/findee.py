@@ -4,12 +4,38 @@ import atexit
 import sys
 import numpy as np
 import logging
+import os
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - [%(levelname)s] - %(message)s',
-)
+#-Colored Formatter for Logging-#
+class ColoredFormatter(logging.Formatter):
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',    # cyan
+        'INFO': '\033[32m',     # green
+        'WARNING': '\033[33m',  # yellow
+        'ERROR': '\033[31m',    # red
+        'CRITICAL': '\033[35m', # purple
+        'RESET': '\033[0m'      # reset
+    }
+
+    def format(self, record):
+        # Apply original format
+        message = super().format(record)
+
+        # Apply color to level name
+        level_color = self.COLORS.get(record.levelname, '')
+        reset = self.COLORS['RESET']
+
+        # Return colored message
+        return f"{level_color}[{record.levelname}]{reset} {message}"
+
+#-Logger Setting-#
 logger = logging.getLogger(__name__)
+handler = logging.StreamHandler()
+handler.setFormatter(ColoredFormatter('%(message)s'))
+logger.addHandler(handler)
+logger.setLevel(logging.DEBUG)
+logging.getLogger('picamera2').setLevel(logging.WARNING)
 
 #-Check for uninstalled modules & Platform-#
 try:
@@ -49,22 +75,51 @@ except Exception as e:
 
 #-Findee Class Definition-#
 class Findee:
-    def __init__(self):
-        #-GPIO Setting-#
+    def __init__(self, safe_mode: bool = False):
+        # GPIO Setting
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
 
-        #-Class Setting-#
-        self.motor = self.Motor()
-        self.camera = self.Camera()
-        self.ultrasonic = self.Ultrasonic()
+        # Class Variables
+        self.safe_mode = safe_mode
+        self._component_status = {
+            "motor": False,
+            "camera": False,
+            "ultrasonic": False
+        }
+
+        # Class Initialization
+        try:
+            self.motor = self.Motor(self)
+            self._component_status["motor"] = self.motor._is_available
+        except Exception as e:
+            logger.error(f"모터 클래스 생성 실패: {e}")
+
+        try:
+            self.camera = self.Camera(self)
+            self._component_status["camera"] = self.camera._is_available
+        except Exception as e:
+            logger.error(f"카메라 클래스 생성 실패: {e}")
+
+        try:
+            self.ultrasonic = self.Ultrasonic(self)
+            self._component_status["ultrasonic"] = self.ultrasonic._is_available
+        except Exception as e:
+            logger.error(f"초음파 센서 클래스 생성 실패: {e}")
 
         #-Cleanup-#
         atexit.register(self.cleanup)
 
+    def get_status(self) -> dict:
+        return self._component_status.copy()
+
     #-Motor Class Definition-#
     class Motor:
-        def __init__(self):
+        def __init__(self, parent_instance):
+            self.parent = parent_instance
+            #-Class Usability-#
+            self._is_available = False
+
             #-Left Wheel GPIO Pins-#
             self.IN3 = 22  # 왼쪽 모터 방향 1
             self.IN4 = 27  # 왼쪽 모터 방향 2
@@ -75,58 +130,81 @@ class Findee:
             self.IN2 = 24  # 오른쪽 모터 방향 2
             self.ENA = 12  # 오른쪽 모터 PWM
 
-            #-GPIO Setup-#
-            self.chan_list = [self.IN1, self.IN2, self.IN3, self.IN4, self.ENA, self.ENB]
-            GPIO.setup(self.chan_list, GPIO.OUT, initial=GPIO.LOW)
+            try:
+                #-GPIO Setup-#
+                self.chan_list = [self.IN1, self.IN2, self.IN3, self.IN4, self.ENA, self.ENB]
+                GPIO.setup(self.chan_list, GPIO.OUT, initial=GPIO.LOW)
 
-            #-PWM Setup-#
-            self.rightPWM = GPIO.PWM(self.ENA, 1000); self.rightPWM.start(0)
-            self.leftPWM = GPIO.PWM(self.ENB, 1000); self.leftPWM.start(0)
+                #-PWM Setup-#
+                self.rightPWM = GPIO.PWM(self.ENA, 1000); self.rightPWM.start(0)
+                self.leftPWM = GPIO.PWM(self.ENB, 1000); self.leftPWM.start(0)
+            except Exception as e:
+                if self.parent.safe_mode:
+                    logger.warning(f"[Safe Mode] 모터 초기화에 실패했습니다. 모터 관련 함수를 사용할 수 없습니다. {e}")
+                    self._is_available = False
+                else:
+                    logger.error(f"모터 초기화에 실패했습니다. 프로그램을 종료합니다. {e}")
+                    sys.exit(1)
+            else:
+                logger.info("모터 초기화 성공!")
+                self._is_available = True
 
             #-Motor Parameter-#
             self.MOTOR_SPEED = 80
             self.start_time_motor = time.time()
 
         def pinChange(self, IN1, IN2, IN3, IN4, ENA, ENB):
-            self.IN1 = IN1
-            self.IN2 = IN2
-            self.IN3 = IN3
-            self.IN4 = IN4
-            self.ENA = ENA
-            self.ENB = ENB
+            self.IN1 = IN1 if IN1 is not None else self.IN1
+            self.IN2 = IN2 if IN2 is not None else self.IN2
+            self.IN3 = IN3 if IN3 is not None else self.IN3
+            self.IN4 = IN4 if IN4 is not None else self.IN4
+            self.ENA = ENA if ENA is not None else self.ENA
+            self.ENB = ENB if ENB is not None else self.ENB
 
         @staticmethod
         def constrain(value, min_value, max_value):
             return max(min(value, max_value), min_value)
 
         #-Basic Motor Control Method-#
-        def control_motors(self, right, left):
-            """
-            right : 20 ~ 100, -20 ~ -100
-            left : -20 ~ -100, 20 ~ 100
-            """
-            right = (1 if right >= 0 else -1) * self.constrain(abs(right), 20, 100)
-            left = (1 if left >= 0 else -1) * self.constrain(abs(left), 20, 100)
+        def control_motors(self, right, left) -> bool:
+            if not self._is_available:
+                logger.warning("모터가 비활성화 상태입니다.")
+                return False
 
-            if right == 0:
-                self.rightPWM.ChangeDutyCycle(0.0)
-                GPIO.output((self.IN1, self.IN2), GPIO.LOW)
-            else:
-                self.rightPWM.ChangeDutyCycle(100.0)
-                GPIO.output(self.IN1, GPIO.HIGH if right > 0 else GPIO.LOW)
-                GPIO.output(self.IN2, GPIO.LOW if right > 0 else GPIO.HIGH)
-                time.sleep(0.02)
-                self.rightPWM.ChangeDutyCycle(abs(right))
+            try:
+                """
+                right : 20 ~ 100, -20 ~ -100
+                left : -20 ~ -100, 20 ~ 100
+                """
+                right = (1 if right >= 0 else -1) * self.constrain(abs(right), 20, 100)
+                left = (1 if left >= 0 else -1) * self.constrain(abs(left), 20, 100)
 
-            if left == 0:
-                self.leftPWM.ChangeDutyCycle(0.0)
-                GPIO.output((self.IN3, self.IN4), GPIO.LOW)
+                #-Right Motor Control-#
+                if right == 0:
+                    self.rightPWM.ChangeDutyCycle(0.0)
+                    GPIO.output((self.IN1, self.IN2), GPIO.LOW)
+                else:
+                    self.rightPWM.ChangeDutyCycle(100.0) # 100% for strong torque at first time
+                    GPIO.output(self.IN1, GPIO.HIGH if right > 0 else GPIO.LOW)
+                    GPIO.output(self.IN2, GPIO.LOW if right > 0 else GPIO.HIGH)
+                    time.sleep(0.02)
+                    self.rightPWM.ChangeDutyCycle(abs(right))
+
+                #-Left Motor Control-#
+                if left == 0:
+                    self.leftPWM.ChangeDutyCycle(0.0)
+                    GPIO.output((self.IN3, self.IN4), GPIO.LOW)
+                else:
+                    self.leftPWM.ChangeDutyCycle(100.0) # 100% for strong torque at first time
+                    GPIO.output(self.IN3, GPIO.HIGH if left > 0 else GPIO.LOW)
+                    GPIO.output(self.IN4, GPIO.LOW if left > 0 else GPIO.HIGH)
+                    time.sleep(0.02)
+                    self.leftPWM.ChangeDutyCycle(abs(left))
+            except Exception as e:
+                logger.warning(f"모터 제어 중 오류가 발생했습니다. {e}")
+                return False
             else:
-                self.leftPWM.ChangeDutyCycle(100.0)
-                GPIO.output(self.IN3, GPIO.HIGH if left > 0 else GPIO.LOW)
-                GPIO.output(self.IN4, GPIO.LOW if left > 0 else GPIO.HIGH)
-                time.sleep(0.02)
-                self.leftPWM.ChangeDutyCycle(abs(left))
+                return True
 
         #-Derived Motor Control Method-#
         # Straight, Backward
@@ -181,47 +259,71 @@ class Findee:
             self.rightPWM.stop()
             self.leftPWM.stop()
             GPIO.cleanup(self.chan_list)
+            logger.info("Motor      Cleanup Successfully!")
 
     #-Camera Class Definition-#
     class Camera:
-        def __init__(self):
+        def __init__(self, parent_instance):
+            # Parent Instance
+            self.parent = parent_instance
+
+            # Class Usability
             self._is_available = False
+
+            # Camera Object
             self.picam2 = None
 
             try:
+                os.environ['LIBCAMERA_LOG_FILE'] = '/dev/null' # disable logging
                 self.picam2 = Picamera2()
                 self.picam2.preview_configuration.main.size = (640, 480)
                 self.picam2.preview_configuration.main.format = "RGB888"
                 self.picam2.configure("preview")
                 self.picam2.start()
-            except RuntimeError as e:
-                logger.error(f"picamera2 초기화 중 오류가 발생했습니다. 카메라 연결을 확인해주세요. {e}")
-                self._is_available = False
             except Exception as e:
-                logger.error(f"카메라 초기화 중 오류가 발생했습니다. {e}")
-                self._is_available = False
+                if self.parent.safe_mode:
+                    logger.warning(f"[Safe Mode] 카메라 초기화에 실패했습니다. 카메라 관련 함수를 사용할 수 없습니다. {e}")
+                    self._is_available = False
+                else:
+                    logger.error(f"카메라 초기화에 실패했습니다. 프로그램을 종료합니다. {e}")
+                    sys.exit(1)
             else:
+                os.environ['LIBCAMERA_LOG_FILE'] = '' # restore logging
+                logger.info("카메라 초기화 성공!")
                 self._is_available = True
-                logger.info("카메라 초기화 완료")
+
+        # TODO: 카메라 해상도 설정 함수 구현
+        # TODO: OpenCV 필터링 등 간단한 함수 구현
 
         #-Get Frame from Camera-#
         def get_frame(self) -> np.ndarray | None:
-            if self._is_available:
+            if not self._is_available:
+                logger.warning("카메라가 비활성화 상태입니다.")
+                return None
+
+            try:
                 frame = self.picam2.capture_array()
                 return frame
-            else:
-                logger.error("카메라가 연결되지 않았습니다. 프레임을 가져올 수 없습니다.")
+            except Exception as e:
+                logger.error(f"프레임 캡처 중 오류가 발생했습니다: {e}")
                 return None
 
         #-Cleanup-#
         def cleanup(self):
-            if self._is_available == True:
+            if self._is_available:
                 self.picam2.stop()
                 del self.picam2
+                logger.info("Camera     Cleanup Successfully!")
 
     #-Ultrasonic Class Definition-#
     class Ultrasonic:
-        def __init__(self):
+        def __init__(self, parent_instance):
+            # Parent Instance
+            self.parent = parent_instance
+
+            # Class Usability
+            self._is_available = False
+
             # GPIO Pin Number
             self.TRIG = 5
             self.ECHO = 6
@@ -230,11 +332,22 @@ class Findee:
             self.SOUND_SPEED = 34300
             self.TRIGGER_PULSE = 0.00001 # 10us
             self.TIMEOUT = 30 # 30ms
-            self.last_distance = None
+            self.last_distance: float | None = None
 
-            # GPIO Pin Setting
-            GPIO.setup(self.TRIG, GPIO.OUT, initial=GPIO.LOW)
-            GPIO.setup(self.ECHO, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            try:
+                # GPIO Pin Setting
+                GPIO.setup(self.TRIG, GPIO.OUT, initial=GPIO.LOW)
+                GPIO.setup(self.ECHO, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+            except Exception as e:
+                if self.parent.safe_mode:
+                    logger.warning(f"[Safe Mode] 초음파 센서 초기화에 실패했습니다. 초음파 센서 관련 함수를 사용할 수 없습니다. {e}")
+                    self._is_available = False
+                else:
+                    logger.error(f"초음파 센서 초기화에 실패했습니다. 프로그램을 종료합니다. {e}")
+                    sys.exit(1)
+            else:
+                logger.info("초음파 센서 초기화 성공!")
+                self._is_available = True
 
         #-Get Last Distance from Ultrasonic Sensor-#
         def get_last_distance(self) -> float | None:
@@ -242,32 +355,58 @@ class Findee:
 
         #-Get Distance from Ultrasonic Sensor-#
         def get_distance(self) -> float | None:
-            #-Trigger-#
-            GPIO.output(self.TRIG, GPIO.HIGH)
-            time.sleep(self.TRIGGER_PULSE)
-            GPIO.output(self.TRIG, GPIO.LOW)
-
-            #-Measure Distance-#
-            start_time = time.time()
-            r = GPIO.wait_for_edge(self.ECHO, GPIO.FALLING, timeout=self.TIMEOUT)
-            end_time = time.time()
-
-            if r is None:
-                #-Timeout-#
+            if not self._is_available:
+                logger.warning("초음파 센서가 비활성화 상태입니다.")
                 return None
-            else:
-                #-Measure Success-#
-                duration = end_time - start_time
-                distance = (duration * self.SOUND_SPEED) / 2
-                self.last_distance = distance
-                return distance
+
+            try:
+                # Trigger
+                GPIO.output(self.TRIG, GPIO.HIGH)
+                time.sleep(self.TRIGGER_PULSE)
+                GPIO.output(self.TRIG, GPIO.LOW)
+
+                # Measure Distance
+                loop_start_time = time.time()
+                while GPIO.input(self.ECHO) == GPIO.LOW:
+                    if time.time() - loop_start_time > 0.1:
+                        logger.warning("ECHO 핀을 읽을 수 없습니다. 초음파 센서의 ECHO 핀의 연결을 확인해주세요.")
+                        return None
+
+                start_time = time.time()
+                r = GPIO.wait_for_edge(self.ECHO, GPIO.FALLING, timeout=self.TIMEOUT)
+                end_time = time.time()
+
+                if r is None:
+                    # Timeout
+                    return None
+                else:
+                    # Measure Success
+                    duration = end_time - start_time
+                    distance = (duration * self.SOUND_SPEED) / 2
+                    self.last_distance = distance
+                    return round(distance, 1)
+            except Exception as e:
+                logger.error(f"초음파 센서 측정 중 오류가 발생했습니다: {e}")
+                return None
 
         #-Cleanup-#
         def cleanup(self):
-            GPIO.cleanup((self.TRIG, self.ECHO))
+            if self._is_available:
+                GPIO.cleanup((self.TRIG, self.ECHO))
+                logger.info("Ultrasonic Cleanup Successfully!")
 
     #-Cleanup-#
     def cleanup(self):
         self.motor.cleanup()
         self.camera.cleanup()
         self.ultrasonic.cleanup()
+        logger.info("Program Terminated Successfully!")
+
+
+if __name__ == "__main__":
+    car = Findee()
+
+    while True:
+        distance = car.ultrasonic.get_distance()
+        print(f"{distance} cm")
+        time.sleep(0.1)

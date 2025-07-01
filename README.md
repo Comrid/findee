@@ -135,8 +135,8 @@ DC 모터 제어를 담당합니다.
 - `cleanup()`: GPIO 정리
 
 #### 고급 제어
-- `smooth_turn_left(speed, angle)`: 부드러운 좌회전 (angle: 0-60)
-- `smooth_turn_right(speed, angle)`: 부드러운 우회전 (angle: 0-60)
+- `curve_left(speed, angle)`: 좌회전 커브 (angle: 0-60)
+- `curve_right(speed, angle)`: 우회전 커브(angle: 0-60)
 - `control_motors(right, left)`: 개별 모터 제어 (-100 ~ 100)
 
 ### 3. Camera 클래스
