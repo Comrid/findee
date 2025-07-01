@@ -264,14 +264,10 @@ class Findee:
 
         #-Cleanup-#
         def cleanup(self):
-            GPIO.cleanup(self.TRIG, self.ECHO)
+            GPIO.cleanup((self.TRIG, self.ECHO))
 
     #-Cleanup-#
     def cleanup(self):
         self.motor.cleanup()
         self.camera.cleanup()
         self.ultrasonic.cleanup()
-
-    #-Destructor-#
-    def __del__(self):
-        self.cleanup()

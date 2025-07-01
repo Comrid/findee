@@ -5,6 +5,6 @@ car = Findee()
 
 while True:
     distance = car.ultrasonic.get_distance()
-    print(distance)
+    print(f"{distance:.3f} cm")
     time.sleep(0.1)
 
