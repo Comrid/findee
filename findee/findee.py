@@ -1,7 +1,4 @@
-import subprocess
 import time
-import threading
-import multiprocessing as mp
 import atexit
 import sys
 import numpy as np
@@ -10,38 +7,46 @@ import logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - [%(levelname)s] - %(message)s',
-    datefmt='%Y년 %m월 %d일 %H:%M:%S'
 )
 logger = logging.getLogger(__name__)
 
-#-Check for uninstalled modules-#
-is_uninstall_module_exist: bool = False
+#-Check for uninstalled modules & Platform-#
 try:
-    import RPi.GPIO as GPIO # pip install RPi.GPIO
-except ImportError as e:
-    logger.error(f"RPi.GPIO 모듈이 설치되어 있지 않습니다. RPi.GPIO 설치 후 다시 시도해주세요. {e}")
-    logger.error(f"pip install RPi.GPIO 를 통해 설치할 수 있습니다.")
-    is_uninstall_module_exist = True
+    is_initialize_error_occured: bool = False
 
-try:
-    from picamera2 import Picamera2 # pip install picamera2
-except ImportError as e:
-    logger.error(f"picamera2 모듈이 설치되어 있지 않습니다. picamera2 설치 후 다시 시도해주세요. {e}")
-    logger.error(f"pip install picamera2 를 통해 설치할 수 있습니다.")
-    is_uninstall_module_exist = True
+    # Check for RPi.GPIO
+    try:
+        import RPi.GPIO as GPIO # pip install RPi.GPIO
+    except ImportError:
+        logger.error(f"findee 모듈을 사용하기 위해 RPi.GPIO 모듈이 필요합니다. pip install RPi.GPIO 를 통해 설치할 수 있습니다.")
+        is_initialize_error_occured = True
 
-try:
-    import cv2 # pip install opencv-python
-except ImportError as e:
-    logger.error(f"opencv-python 모듈이 설치되어 있지 않습니다. opencv-python 설치 후 다시 시도해주세요. {e}")
-    logger.error(f"pip install opencv-python 를 통해 설치할 수 있습니다.")
-    is_uninstall_module_exist = True
+    # Check for picamera2
+    try:
+        from picamera2 import Picamera2 # pip install picamera2
+    except ImportError:
+        logger.error(f"findee 모듈을 사용하기 위해 picamera2 모듈이 필요합니다. pip install picamera2 를 통해 설치할 수 있습니다.")
+        is_initialize_error_occured = True
 
-if is_uninstall_module_exist:
+    # Check for opencv-python
+    try:
+        import cv2 # pip install opencv-python
+    except ImportError:
+        logger.error(f"findee 모듈을 사용하기 위해 opencv-python 모듈이 필요합니다. pip install opencv-python 를 통해 설치할 수 있습니다.")
+        is_initialize_error_occured = True
+
+    # Check for Platform
+    platform = sys.platform
+    if platform == "win32":
+        logger.error(f"findee 모듈은 Windows 플랫폼에서는 사용할 수 없습니다. {platform} 플랫폼은 지원하지 않습니다.")
+        is_initialize_error_occured = True
+
+    if is_initialize_error_occured:
+        raise Exception()
+except Exception as e:
     sys.exit(1)
-del is_uninstall_module_exist
 
-#-Findee Class-#
+#-Findee Class Definition-#
 class Findee:
     def __init__(self):
         #-GPIO Setting-#
@@ -56,6 +61,7 @@ class Findee:
         #-Cleanup-#
         atexit.register(self.cleanup)
 
+    #-Motor Class Definition-#
     class Motor:
         def __init__(self):
             #-Left Wheel GPIO Pins-#
@@ -175,6 +181,7 @@ class Findee:
             self.leftPWM.stop()
             GPIO.cleanup(self.chan_list)
 
+    #-Camera Class Definition-#
     class Camera:
         def __init__(self):
             self._is_available = False
@@ -196,6 +203,7 @@ class Findee:
                 self._is_available = True
                 logger.info("카메라 초기화 완료")
 
+        #-Get Frame from Camera-#
         def get_frame(self) -> np.ndarray | None:
             if self._is_available:
                 frame = self.picam2.capture_array()
@@ -204,24 +212,13 @@ class Findee:
                 logger.error("카메라가 연결되지 않았습니다. 프레임을 가져올 수 없습니다.")
                 return None
 
-        def camera_test(self):
-            process = subprocess.Popen(
-                ['libcamera-hello'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True
-            )
-            for line in process.stdout:
-                print(line, end='')
-            process.wait()
-            if process.returncode != 0:
-                print(f"\n[오류] libcamera-hello 종료 코드: {process.returncode}")
-
+        #-Cleanup-#
         def cleanup(self):
             if self._is_available == True:
                 self.picam2.stop()
                 del self.picam2
 
+    #-Ultrasonic Class Definition-#
     class Ultrasonic:
         def __init__(self):
             # GPIO Pin Number
@@ -238,11 +235,11 @@ class Findee:
             GPIO.setup(self.TRIG, GPIO.OUT, initial=GPIO.LOW)
             GPIO.setup(self.ECHO, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
 
-
-
+        #-Get Last Distance from Ultrasonic Sensor-#
         def get_last_distance(self) -> float | None:
             return self.last_distance
 
+        #-Get Distance from Ultrasonic Sensor-#
         def get_distance(self) -> float | None:
             #-Trigger-#
             GPIO.output(self.TRIG, GPIO.HIGH)
@@ -264,13 +261,16 @@ class Findee:
                 self.last_distance = distance
                 return distance
 
+        #-Cleanup-#
         def cleanup(self):
             GPIO.cleanup(self.TRIG, self.ECHO)
 
+    #-Cleanup-#
     def cleanup(self):
         self.motor.cleanup()
         self.camera.cleanup()
         self.ultrasonic.cleanup()
 
+    #-Destructor-#
     def __del__(self):
         self.cleanup()
