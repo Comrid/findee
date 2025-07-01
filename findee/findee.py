@@ -224,13 +224,13 @@ class Findee:
 
         # Rotation
         def turn_left(self, speed : float, time_sec : float = None):
-            self.control_motors(-speed, speed)
+            self.control_motors(speed, -speed)
             if time_sec is not None:
                 time.sleep(time_sec)
                 self.stop()
 
         def turn_right(self, speed : float, time_sec : float = None):
-            self.control_motors(speed, -speed)
+            self.control_motors(-speed, speed)
             if time_sec is not None:
                 time.sleep(time_sec)
                 self.stop()
