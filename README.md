@@ -174,7 +174,6 @@ HC-SR04 초음파 센서 제어를 담당합니다.
 - 측정 범위: 2-400cm
 - 정확도: ±1cm
 
-```
 
 ### 이슈 리포트
 버그나 기능 요청은 [GitHub Issues](https://github.com/Comrid/findee/issues)를 이용해주세요.
