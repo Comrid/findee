@@ -310,6 +310,53 @@ class Findee:
                 logger.error(f"프레임 캡처 중 오류가 발생했습니다: {e}")
                 return None
 
+        #-Crop Center of Image-#
+        @staticmethod
+        def crop_image(image : np.ndarray, scale : float = 1.0) -> np.ndarray:
+            h, w = image.shape[:2]
+            cx, cy = w // 2, h // 2
+
+            crop_w = int(w * scale / 2)
+            crop_h = int(h * scale / 2)
+
+            x1 = max(cx - crop_w, 0)
+            x2 = min(cx + crop_w, w)
+            y1 = max(cy - crop_h, 0)
+            y2 = min(cy + crop_h, h)
+
+            return image[y1:y2, x1:x2]
+
+        #-Image to ASCII-#
+        @staticmethod
+        def image_to_ascii(image: np.ndarray, width: int = 100, contrast: int = 10, reverse: bool = False) -> str:
+            # Density Definition
+            density = ('$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|'
+                    '()1{}[]?-_+~<>i!lI;:,"^`\'.            ')
+            if reverse:
+                density = density[::-1]
+            density = density[:-11 + contrast]
+            n = len(density)
+
+            # Convert to Grayscale
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+            # Resize to Ratio
+            orig_height, orig_width = gray.shape
+            ratio = orig_height / orig_width
+            height = int(width * ratio * 0.5)
+            resized = cv2.resize(gray, (width, height), interpolation=cv2.INTER_AREA)
+
+            # Map Brightness to ASCII Characters
+            ascii_img = ""
+            for i in range(height):
+                for j in range(width):
+                    p = resized[i, j]
+                    k = int(np.floor(p / 256 * n))
+                    ascii_img += density[n - 1 - k]
+                ascii_img += "\n"
+
+            return ascii_img
+
         #-Cleanup-#
         def cleanup(self):
             if self._is_available:
@@ -418,13 +465,7 @@ class Findee:
 if __name__ == "__main__":
     robot = Findee()
 
-    print("초음파 센서 테스트 시작!")
-
-    for i in range(10):
-        distance = robot.ultrasonic.get_distance()
-        print(f"측정한 거리: {distance} cm")
-        time.sleep(0.1)
-
-    print("테스트 완료!")
-    robot.motor.move_forward(100, 1)
-    time.sleep(5)
+    frame = robot.camera.get_frame()
+    cropped_frame = robot.camera.crop_image(frame, 0.5)
+    ascii_image = robot.camera.image_to_ascii(cropped_frame, 100, 10, False)
+    print(ascii_image)
