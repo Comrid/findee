@@ -29,7 +29,7 @@ def update_version_file(new_version: str):
 def git_commit_push(new_version: str):
     cmds = [
         ["git", "add", "."],
-        ["git", "commit", "-m", f"Updated at {new_version}"],
+        ["git", "commit", "-m", f"Updated in Version {new_version}"],
         ["git", "push", "origin", "main"]
     ]
     for cmd in cmds:

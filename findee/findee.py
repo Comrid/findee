@@ -4,8 +4,9 @@ import threading
 import multiprocessing as mp
 import atexit
 import sys
-
+import numpy as np
 import logging
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - [%(levelname)s] - %(message)s',
@@ -180,16 +181,11 @@ class Findee:
             self.picam2 = None
 
             try:
-                from picamera2 import Picamera2 # pip install picamera2
                 self.picam2 = Picamera2()
                 self.picam2.preview_configuration.main.size = (640, 480)
                 self.picam2.preview_configuration.main.format = "RGB888"
                 self.picam2.configure("preview")
                 self.picam2.start()
-            except ImportError as e:
-                logger.error(f"picamera2 모듈이 설치되어 있지 않습니다. picamera2 설치 후 다시 시도해주세요. {e}")
-                self._is_available = False
-                sys.exit(1)
             except RuntimeError as e:
                 logger.error(f"picamera2 초기화 중 오류가 발생했습니다. 카메라 연결을 확인해주세요. {e}")
                 self._is_available = False
@@ -200,7 +196,7 @@ class Findee:
                 self._is_available = True
                 logger.info("카메라 초기화 완료")
 
-        def get_frame(self):
+        def get_frame(self) -> np.ndarray | None:
             if self._is_available:
                 frame = self.picam2.capture_array()
                 return frame
