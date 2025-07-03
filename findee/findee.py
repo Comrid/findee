@@ -5,6 +5,7 @@ import sys
 import numpy as np
 import logging
 import os
+import subprocess
 
 #-Colored Formatter for Logging-#
 class ColoredFormatter(logging.Formatter):
@@ -81,6 +82,7 @@ class Findee:
         GPIO.setmode(GPIO.BCM)
 
         # Class Variables
+        self.ip = subprocess.check_output(['hostname', '-I'], shell=False).decode().split()[0]
         self.safe_mode = safe_mode
         self._component_status = {
             "motor": False,
@@ -261,7 +263,7 @@ class Findee:
             self.rightPWM.stop()
             self.leftPWM.stop()
             GPIO.cleanup(self.chan_list)
-            logger.info("Motor      Cleanup Successfully!")
+            logger.info("모터 정리 완료!")
 
     #-Camera Class Definition-#
     class Camera:
@@ -315,7 +317,7 @@ class Findee:
             if self._is_available:
                 self.picam2.stop()
                 del self.picam2
-                logger.info("Camera     Cleanup Successfully!")
+                logger.info("카메라 정리 완료!")
 
     #-Ultrasonic Class Definition-#
     class Ultrasonic:
@@ -405,7 +407,7 @@ class Findee:
         def cleanup(self):
             if self._is_available:
                 GPIO.cleanup((self.TRIG, self.ECHO))
-                logger.info("Ultrasonic Cleanup Successfully!")
+                logger.info("초음파 정리 완료!")
 
     #-Cleanup-#
     def cleanup(self):
@@ -413,3 +415,7 @@ class Findee:
         self.camera.cleanup()
         self.ultrasonic.cleanup()
         logger.info("프로그램이 정상적으로 종료되었습니다.")
+
+if __name__ == "__main__":
+    robot = Findee()
+    print(robot.ip)
