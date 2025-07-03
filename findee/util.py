@@ -1,7 +1,6 @@
 import cv2
 import numpy as np
 import logging
-import sys
 
 #-Crop Center of Image-#
 def crop_image(image : np.ndarray, scale : float = 1.0) -> np.ndarray:
@@ -72,8 +71,9 @@ class FindeeFormatter(logging.Formatter):
 
     def get_logger(self):
         logger = logging.getLogger("Findee")
-        handler = logging.StreamHandler()
-        handler.setFormatter(FindeeFormatter('%(message)s'))
-        logger.addHandler(handler)
-        logger.setLevel(logging.DEBUG)
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            handler.setFormatter(FindeeFormatter('%(message)s'))
+            logger.addHandler(handler)
+            logger.setLevel(logging.DEBUG)
         return logger
