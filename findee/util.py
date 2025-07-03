@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import logging
+import sys
 
 #-Crop Center of Image-#
 def crop_image(image : np.ndarray, scale : float = 1.0) -> np.ndarray:
@@ -19,8 +21,7 @@ def crop_image(image : np.ndarray, scale : float = 1.0) -> np.ndarray:
 #-Image to ASCII-#
 def image_to_ascii(image: np.ndarray, width: int = 100, contrast: int = 10, reverse: bool = False) -> str:
     # Density Definition
-    density = ('$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|'
-            '()1{}[]?-_+~<>i!lI;:,"^`\'.            ')
+    density = r'$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,"^`\'.            '
     if reverse:
         density = density[::-1]
     density = density[:-11 + contrast]
@@ -45,3 +46,34 @@ def image_to_ascii(image: np.ndarray, width: int = 100, contrast: int = 10, reve
         ascii_img += "\n"
 
     return ascii_img
+
+#-Colored Formatter for Logging-#
+class FindeeFormatter(logging.Formatter):
+    # ANSI color codes
+    COLORS = {
+        'DEBUG': '\033[36m',    # cyan
+        'INFO': '\033[32m',     # green
+        'WARNING': '\033[33m',  # yellow
+        'ERROR': '\033[31m',    # red
+        'CRITICAL': '\033[35m', # purple
+        'RESET': '\033[0m'      # reset
+    }
+
+    def format(self, record):
+        # Apply original format
+        message = super().format(record)
+
+        # Apply color to level name
+        level_color = self.COLORS.get(record.levelname, '')
+        reset = self.COLORS['RESET']
+
+        # Return colored message
+        return f"{level_color}[{record.levelname}]{reset} {message}"
+
+    def get_logger(self):
+        logger = logging.getLogger("Findee")
+        handler = logging.StreamHandler()
+        handler.setFormatter(FindeeFormatter('%(message)s'))
+        logger.addHandler(handler)
+        logger.setLevel(logging.DEBUG)
+        return logger

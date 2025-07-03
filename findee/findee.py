@@ -6,36 +6,9 @@ import numpy as np
 import logging
 import os
 import subprocess
+from .util import FindeeFormatter
 
-#-Colored Formatter for Logging-#
-class ColoredFormatter(logging.Formatter):
-    # ANSI color codes
-    COLORS = {
-        'DEBUG': '\033[36m',    # cyan
-        'INFO': '\033[32m',     # green
-        'WARNING': '\033[33m',  # yellow
-        'ERROR': '\033[31m',    # red
-        'CRITICAL': '\033[35m', # purple
-        'RESET': '\033[0m'      # reset
-    }
-
-    def format(self, record):
-        # Apply original format
-        message = super().format(record)
-
-        # Apply color to level name
-        level_color = self.COLORS.get(record.levelname, '')
-        reset = self.COLORS['RESET']
-
-        # Return colored message
-        return f"{level_color}[{record.levelname}]{reset} {message}"
-
-#-Logger Setting-#
-logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-handler.setFormatter(ColoredFormatter('%(message)s'))
-logger.addHandler(handler)
-logger.setLevel(logging.DEBUG)
+logger = FindeeFormatter().get_logger()
 logging.getLogger('picamera2').setLevel(logging.WARNING)
 
 #-Check for uninstalled modules & Platform-#
