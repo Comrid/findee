@@ -148,7 +148,6 @@ class Findee:
             if not self._is_available:
                 logger.warning("모터가 비활성화 상태입니다.")
                 return False
-
             try:
                 """
                 right : 20 ~ 100, -20 ~ -100, 0
@@ -161,6 +160,7 @@ class Findee:
                 else:
                     right = (1 if right >= 0 else -1) * self.constrain(abs(right), 20, 100)
                     self.rightPWM.ChangeDutyCycle(100.0) # 100% for strong torque at first time
+                    # OUT1(HIGH) -> OUT2(LOW) : Forward
                     GPIO.output(self.IN1, GPIO.HIGH if right > 0 else GPIO.LOW)
                     GPIO.output(self.IN2, GPIO.LOW if right > 0 else GPIO.HIGH)
                     time.sleep(0.02)
@@ -173,8 +173,9 @@ class Findee:
                 else:
                     left = (1 if left >= 0 else -1) * self.constrain(abs(left), 20, 100)
                     self.leftPWM.ChangeDutyCycle(100.0) # 100% for strong torque at first time
-                    GPIO.output(self.IN3, GPIO.HIGH if left > 0 else GPIO.LOW)
-                    GPIO.output(self.IN4, GPIO.LOW if left > 0 else GPIO.HIGH)
+                    # OUT4(HIGH) -> OUT3(LOW) : Forward
+                    GPIO.output(self.IN4, GPIO.HIGH if left > 0 else GPIO.LOW)
+                    GPIO.output(self.IN3, GPIO.LOW if left > 0 else GPIO.HIGH)
                     time.sleep(0.02)
                     self.leftPWM.ChangeDutyCycle(abs(left))
             except Exception as e:
