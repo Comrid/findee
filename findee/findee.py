@@ -296,13 +296,18 @@ class Findee:
 
         #-Cleanup-#
         def cleanup(self):
-            if self._is_available:
-                try:
+            try:
+                # picam2 속성이 존재하고 None이 아닌 경우에만 정리
+                if hasattr(self, 'picam2') and self.picam2 is not None:
                     self.picam2.stop()
                     del self.picam2
                     logger.info("카메라 정리 완료!")
-                except Exception as e:
-                    logger.error(f"카메라 정리 중 오류가 발생했습니다: {e}")
+            except Exception as e:
+                logger.error(f"카메라 정리 중 오류가 발생했습니다: {e}")
+            finally:
+                # 정리 후 상태 초기화
+                self.picam2 = None
+                self._is_available = False
 
     #-Ultrasonic Class Definition-#
     class Ultrasonic:

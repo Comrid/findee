@@ -13,9 +13,9 @@ readme = "README.md"
 keywords = ["pathfinder", "finder", "findee", "raspberry-pi", "robotics", "autonomous-vehicle", "gpio"]
 requires-python = ">=3.7"
 dependencies = [
-    "RPi.GPIO>=0.7.0",
-    "picamera2>=0.3.0",
-    "opencv-python>=4.5.0",
+    "RPi.GPIO",
+    "picamera2",
+    "opencv-python",
 ]
 classifiers = [
   "Development Status :: 3 - Alpha",
