@@ -45,11 +45,16 @@ try:
     if is_initialize_error_occured:
         raise Exception()
 except Exception as e:
+    logger.error(f"findee 모듈 초기화 중 오류가 발생했습니다: {e}")
     sys.exit(1)
+
+
 
 #-Findee Class Definition-#
 class Findee:
     def __init__(self, safe_mode: bool = False):
+        logger.info("Findee 초기화 시작!")
+
         # GPIO Setting
         GPIO.setwarnings(False)
         GPIO.setmode(GPIO.BCM)
@@ -90,6 +95,9 @@ class Findee:
 
     def get_status(self) -> dict:
         return self._component_status.copy()
+
+    def get_hostname(self) -> str:
+        return self.ip
 
     #-Motor Class Definition-#
     class Motor:
@@ -289,9 +297,12 @@ class Findee:
         #-Cleanup-#
         def cleanup(self):
             if self._is_available:
-                self.picam2.stop()
-                del self.picam2
-                logger.info("카메라 정리 완료!")
+                try:
+                    self.picam2.stop()
+                    del self.picam2
+                    logger.info("카메라 정리 완료!")
+                except Exception as e:
+                    logger.error(f"카메라 정리 중 오류가 발생했습니다: {e}")
 
     #-Ultrasonic Class Definition-#
     class Ultrasonic:
@@ -390,6 +401,6 @@ class Findee:
         self.ultrasonic.cleanup()
         logger.info("프로그램이 정상적으로 종료되었습니다.")
 
-#if __name__ == "__main__":
-#    robot = Findee()
-#    print(robot.ip)
+if __name__ == "__main__":
+    robot = Findee()
+    print(robot.ip)

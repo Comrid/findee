@@ -18,7 +18,7 @@ def crop_image(image : np.ndarray, scale : float = 1.0) -> np.ndarray:
     return image[y1:y2, x1:x2]
 
 #-Image to ASCII-#
-def image_to_ascii(image: np.ndarray, width: int = 100, contrast: int = 10, reverse: bool = False) -> str:
+def image_to_ascii(image: np.ndarray, width: int = 100, contrast: int = 10, reverse: bool = True) -> str:
     # Density Definition
     density = r'$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,"^`\'.            '
     if reverse:
