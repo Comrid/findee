@@ -125,18 +125,18 @@ class Findee:
                 hostname = "Unknown"
 
             # Findee 컴포넌트 상태
-            component_status = self.findee.get_status() if hasattr(self, 'findee') else {}
+            component_status = self.get_status()
 
             return {
                 'cpu_percent': cpu_percent,
                 'memory_percent': memory_percent,
                 'cpu_temperature': cpu_temp,
                 'hostname': hostname,
-                'fps': self.fps,
+                'fps': self.camera.fps if self.camera._is_available else 0,
                 'camera_status': component_status.get('camera', False),
                 'motor_status': component_status.get('motor', False),
                 'ultrasonic_status': component_status.get('ultrasonic', False),
-                'current_resolution': self.get_current_resolution(),
+                'current_resolution': self.camera.get_current_resolution() if self.camera._is_available else 'N/A',
             }
         except Exception as e:
             return {'error': str(e)}
