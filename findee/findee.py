@@ -6,6 +6,8 @@ import numpy as np
 import logging
 import os
 import subprocess
+import psutil
+import threading
 from .util import FindeeFormatter
 
 logger = FindeeFormatter().get_logger()
@@ -52,7 +54,7 @@ except Exception as e:
 
 #-Findee Class Definition-#
 class Findee:
-    def __init__(self, safe_mode: bool = False):
+    def __init__(self, safe_mode: bool = False, camera_resolution: tuple[int, int] = (640, 480)):
         logger.info("Findee 초기화 시작!")
 
         # GPIO Setting
@@ -76,7 +78,7 @@ class Findee:
             logger.error(f"모터 클래스 생성 실패: {e}")
 
         try:
-            self.camera = self.Camera(self)
+            self.camera = self.Camera(self, camera_resolution)
             self._component_status["camera"] = self.camera._is_available
         except Exception as e:
             logger.error(f"카메라 클래스 생성 실패: {e}")
@@ -98,6 +100,46 @@ class Findee:
 
     def get_hostname(self) -> str:
         return self.ip
+
+    def get_system_info(self):
+        """시스템 정보 조회"""
+        try:
+            # CPU 사용률
+            cpu_percent = psutil.cpu_percent(interval=0.1)
+
+            # 메모리 사용률
+            memory = psutil.virtual_memory()
+            memory_percent = memory.percent
+
+            # CPU 온도
+            try:
+                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                    cpu_temp = int(f.read()) / 1000.0
+            except:
+                cpu_temp = 0
+
+            # 네트워크 정보
+            try:
+                hostname = subprocess.check_output(['hostname', '-I'], shell=False).decode().strip()
+            except:
+                hostname = "Unknown"
+
+            # Findee 컴포넌트 상태
+            component_status = self.findee.get_status() if hasattr(self, 'findee') else {}
+
+            return {
+                'cpu_percent': cpu_percent,
+                'memory_percent': memory_percent,
+                'cpu_temperature': cpu_temp,
+                'hostname': hostname,
+                'fps': self.fps,
+                'camera_status': component_status.get('camera', False),
+                'motor_status': component_status.get('motor', False),
+                'ultrasonic_status': component_status.get('ultrasonic', False),
+                'current_resolution': self.get_current_resolution(),
+            }
+        except Exception as e:
+            return {'error': str(e)}
 
     #-Motor Class Definition-#
     class Motor:
@@ -249,7 +291,7 @@ class Findee:
 
     #-Camera Class Definition-#
     class Camera:
-        def __init__(self, parent_instance):
+        def __init__(self, parent_instance, camera_resolution: tuple[int, int] = (640, 480)):
             # Parent Instance
             self.parent = parent_instance
 
@@ -259,10 +301,27 @@ class Findee:
             # Camera Object
             self.picam2 = None
 
+            # Camera Parameter
+            self.current_frame = None
+            self.frame_lock = threading.Lock()
+            self.current_resolution = camera_resolution
+            self.fps = 0
+            self.frame_count = 0
+            self.last_fps_time = time.time()
+
+            self.available_resolutions = [
+                {'label': '320x240 (QVGA)', 'value': '320x240', 'width': 320, 'height': 240},
+                {'label': '640x480 (VGA)', 'value': '640x480', 'width': 640, 'height': 480},
+                {'label': '800x600 (SVGA)', 'value': '800x600', 'width': 800, 'height': 600},
+                {'label': '1024x768 (XGA)', 'value': '1024x768', 'width': 1024, 'height': 768},
+                {'label': '1280x720 (HD)', 'value': '1280x720', 'width': 1280, 'height': 720},
+                {'label': '1920x1080 (FHD)', 'value': '1920x1080', 'width': 1920, 'height': 1080}
+            ]
+
             try:
                 os.environ['LIBCAMERA_LOG_FILE'] = '/dev/null' # disable logging
                 self.picam2 = Picamera2()
-                self.picam2.preview_configuration.main.size = (640, 480)
+                self.picam2.preview_configuration.main.size = self.current_resolution
                 self.picam2.preview_configuration.main.format = "RGB888"
                 self.picam2.configure("preview")
                 self.picam2.start()
@@ -293,6 +352,105 @@ class Findee:
             except Exception as e:
                 logger.error(f"프레임 캡처 중 오류가 발생했습니다: {e}")
                 return None
+
+        def start_frame_capture(self):
+            """별도 스레드에서 프레임 캡처 시작"""
+            def capture_loop():
+                while self._is_available:
+                    try:
+                        frame = self.get_frame()
+                        if frame is not None:
+                            with self.frame_lock:
+                                self.current_frame = frame.copy()
+
+                            # FPS 계산
+                            self.frame_count += 1
+                            current_time = time.time()
+                            if current_time - self.last_fps_time >= 1.0:
+                                self.fps = self.frame_count
+                                self.frame_count = 0
+                                self.last_fps_time = current_time
+
+                        time.sleep(0.033)  # ~30 FPS
+                    except Exception as e:
+                        print(f"프레임 캡처 오류: {e}")
+                        time.sleep(0.1)
+                        continue
+
+            capture_thread = threading.Thread(target=capture_loop, daemon=True)
+            capture_thread.start()
+
+        def generate_frames(self):
+            """MJPEG 프레임 생성 (Flask 스트리밍용)"""
+            while self._is_available:
+                try:
+                    with self.frame_lock:
+                        if self.current_frame is not None:
+                            frame = self.current_frame.copy()
+                        else:
+                            # 기본 프레임 생성 (카메라 연결 대기 중)
+                            frame = self.create_placeholder_frame()
+
+                    # JPEG로 인코딩
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                    if ret:
+                        frame_bytes = buffer.tobytes()
+                        yield (b'--frame\r\n'
+                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+
+                    time.sleep(0.033)  # ~30 FPS
+
+                except Exception as e:
+                    print(f"프레임 생성 오류: {e}")
+                    time.sleep(0.1)
+                    continue
+
+        def create_placeholder_frame(self):
+            """카메라 연결 대기 중 표시할 플레이스홀더 프레임"""
+            frame = np.zeros((self.current_resolution[1], self.current_resolution[0], 3), dtype=np.uint8)
+            frame.fill(50)  # 어두운 회색 배경
+
+            # 텍스트 추가
+            text = "Camera Connecting..."
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            text_size = cv2.getTextSize(text, font, 1, 2)[0]
+            text_x = (frame.shape[1] - text_size[0]) // 2
+            text_y = (frame.shape[0] + text_size[1]) // 2
+
+            cv2.putText(frame, text, (text_x, text_y), font, 1, (255, 255, 255), 2)
+            return frame
+
+        def configure_resolution(self, width : int, height : int):
+            try:
+                if hasattr(self.parent, 'camera') and self.parent.camera._is_available:
+                    previous_resolution = self.current_resolution
+                    self.current_resolution = (width, height)
+                    # picamera2 해상도 설정
+                    self.parent.camera.picam2.stop()
+                    self.parent.camera.picam2.preview_configuration.main.size = (width, height)
+                    self.parent.camera.picam2.configure("preview")
+                    self.parent.camera.picam2.start()
+                    logger.info(f"카메라 해상도가 변경되었습니다. {previous_resolution} -> {self.current_resolution}")
+            except Exception as e:
+                logger.error(f"카메라 해상도 변경 중 오류가 발생하였습니다. {previous_resolution} -> {self.current_resolution}")
+                # 기본 해상도로 복구 시도
+                if self.current_resolution != (640, 480):
+                    self.current_resolution = (640, 480)
+                    try:
+                        self.parent.camera.picam2.preview_configuration.main.size = (640, 480)
+                        self.parent.camera.picam2.configure("preview")
+                        self.parent.camera.picam2.start()
+                        logger.info("기본 해상도로 복구 성공")
+                    except Exception as e:
+                        logger.error(f"기본 해상도 복구 실패: {e}")
+
+        def get_available_resolutions(self):
+            """사용 가능한 해상도 목록 반환"""
+            return self.available_resolutions
+
+        def get_current_resolution(self):
+            """현재 해상도 반환"""
+            return f"{self.current_resolution[0]}x{self.current_resolution[1]}"
 
         #-Cleanup-#
         def cleanup(self):
