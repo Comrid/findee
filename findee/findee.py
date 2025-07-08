@@ -390,6 +390,6 @@ class Findee:
         self.ultrasonic.cleanup()
         logger.info("프로그램이 정상적으로 종료되었습니다.")
 
-if __name__ == "__main__":
-    robot = Findee()
-    print(robot.ip)
+#if __name__ == "__main__":
+#    robot = Findee()
+#    print(robot.ip)
