@@ -8,173 +8,172 @@ import os
 import subprocess
 import psutil
 import threading
-from .util import FindeeFormatter
+from typing import Optional
+from .util import FindeeFormatter, LogMessage
+from dataclasses import dataclass
+from pydantic import BaseModel
+
+# region : Dataclass Definition
+class Status(BaseModel):
+    safe_mode: bool = False
+    motor_status: bool = False
+    camera_status: bool = False
+    ultrasonic_status: bool = False
+
+class CameraStatus(BaseModel):
+    fps: float
+    current_resolution: tuple[int, int]
+
+class SystemInfo(BaseModel):
+    hostname: str  = "0.0.0.0"
+    cpu_percent: float = 0.0
+    cpu_cores_percent: list[float] = []
+    cpu_temperature: float = 0.0
+    memory_percent: float = 0.0
+# endregion
 
 logger = FindeeFormatter().get_logger()
 logging.getLogger('picamera2').setLevel(logging.WARNING)
 
-#-Check for uninstalled modules & Platform-#
+# region : Check for uninstalled modules & Platform
 try:
+    logger.info(LogMessage.module_import_start)
     is_initialize_error_occured: bool = False
 
     # Check for RPi.GPIO
     try:
         import RPi.GPIO as GPIO # pip install RPi.GPIO
     except ImportError:
-        logger.error(f"findee 모듈을 사용하기 위해 RPi.GPIO 모듈이 필요합니다. pip install RPi.GPIO 를 통해 설치할 수 있습니다.")
+        logger.error(LogMessage.module_not_installed.format(module="RPi.GPIO"))
         is_initialize_error_occured = True
 
     # Check for picamera2
     try:
         from picamera2 import Picamera2 # pip install picamera2
     except ImportError:
-        logger.error(f"findee 모듈을 사용하기 위해 picamera2 모듈이 필요합니다. pip install picamera2 를 통해 설치할 수 있습니다.")
+        logger.error(LogMessage.module_not_installed.format(module="picamera2"))
         is_initialize_error_occured = True
 
     # Check for opencv-python
     try:
         import cv2 # pip install opencv-python
     except ImportError:
-        logger.error(f"findee 모듈을 사용하기 위해 opencv-python 모듈이 필요합니다. pip install opencv-python 를 통해 설치할 수 있습니다.")
+        logger.error(LogMessage.module_not_installed.format(module="opencv-python"))
         is_initialize_error_occured = True
 
     # Check for Platform
     platform = sys.platform
     if platform == "win32":
-        logger.error(f"findee 모듈은 Windows 플랫폼에서는 사용할 수 없습니다. {platform} 플랫폼은 지원하지 않습니다.")
+        logger.error(LogMessage.platform_not_supported.format(platform=platform))
         is_initialize_error_occured = True
 
     if is_initialize_error_occured:
         raise Exception()
 except Exception as e:
-    logger.error(f"findee 모듈 초기화 중 오류가 발생했습니다: {e}")
+    logger.error(LogMessage.module_import_failure.format(error=e))
     sys.exit(1)
+else:
+    logger.info(LogMessage.module_import_success)
+# endregion
 
-
-
-#-Findee Class Definition-#
+# region : Findee Class Definition
 class Findee:
     def __init__(self, safe_mode: bool = False, camera_resolution: tuple[int, int] = (640, 480)):
-        logger.info("Findee 초기화 시작!")
-
-        # GPIO Setting
-        GPIO.setwarnings(False)
-        GPIO.setmode(GPIO.BCM)
-
-        # Class Variables
-        self.ip = subprocess.check_output(['hostname', '-I'], shell=False).decode().split()[0]
-        self.safe_mode = safe_mode
-        self._component_status = {
-            "motor": False,
-            "camera": False,
-            "ultrasonic": False
-        }
-
-        # Class Initialization
         try:
-            self.motor = self.Motor(self)
-            self._component_status["motor"] = self.motor._is_available
+            logger.info(LogMessage.findee_init_start)
+
+            # GPIO Setting
+            GPIO.setwarnings(False)
+            GPIO.setmode(GPIO.BCM)
+
+            # Class Initialization
+            self.motor = self.Motor(safe_mode)
+            self.camera = self.Camera(safe_mode, camera_resolution)
+            self.ultrasonic = self.Ultrasonic(safe_mode)
+
+            # Class Variables
+            self.system_info = SystemInfo(hostname=subprocess.check_output(['hostname', '-I'], shell=False).decode().strip())
+            self.update_system_info()
+            self.status = Status(
+                safe_mode = safe_mode,
+                motor_status = self.motor._is_available,
+                camera_status = self.camera._is_available,
+                ultrasonic_status = self.ultrasonic._is_available
+            )
+
+            #-Cleanup-#
+            atexit.register(self.cleanup)
         except Exception as e:
-            logger.error(f"모터 클래스 생성 실패: {e}")
+            logger.error(LogMessage.findee_init_failure.format(error=e))
+            sys.exit(1)
+        else:
+            logger.info(LogMessage.findee_init_success)
+            time.sleep(0.1)
 
-        try:
-            self.camera = self.Camera(self, camera_resolution)
-            self._component_status["camera"] = self.camera._is_available
-        except Exception as e:
-            logger.error(f"카메라 클래스 생성 실패: {e}")
+# region : Findee Class Methods
+    def update_system_info(self):
+        def _update():
+            while True:
+                self.system_info.cpu_percent = psutil.cpu_percent(interval=0.1)
+                self.system_info.cpu_cores_percent = psutil.cpu_percent(interval=0.1, percpu=True)
+                self.system_info.memory_percent = psutil.virtual_memory().percent
+                try:
+                    with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
+                        self.system_info.cpu_temperature = int(f.read()) / 1000.0
+                except FileNotFoundError:
+                    self.system_info.cpu_temperature = 0.0
+                time.sleep(1)
+        threading.Thread(target=_update, daemon=True).start()
 
-        try:
-            self.ultrasonic = self.Ultrasonic(self)
-            self._component_status["ultrasonic"] = self.ultrasonic._is_available
-        except Exception as e:
-            logger.error(f"초음파 센서 클래스 생성 실패: {e}")
-
-        #-Cleanup-#
-        atexit.register(self.cleanup)
-
-        # Time delay for Stabilization
-        time.sleep(0.1)
+    def get_system_info(self) -> dict:
+        return self.system_info.model_dump()
 
     def get_status(self) -> dict:
-        return self._component_status.copy()
+        return self.status.model_dump()
 
     def get_hostname(self) -> str:
-        return self.ip
+        return self.system_info.hostname
 
-    def get_system_info(self):
-        """시스템 정보 조회"""
-        try:
-            # CPU 사용률
-            cpu_percent = psutil.cpu_percent(interval=0.1)
-
-            # 메모리 사용률
-            memory = psutil.virtual_memory()
-            memory_percent = memory.percent
-
-            # CPU 온도
-            try:
-                with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
-                    cpu_temp = int(f.read()) / 1000.0
-            except:
-                cpu_temp = 0
-
-            # 네트워크 정보
-            try:
-                hostname = subprocess.check_output(['hostname', '-I'], shell=False).decode().strip()
-            except:
-                hostname = "Unknown"
-
-            # Findee 컴포넌트 상태
-            component_status = self.get_status()
-
-            return {
-                'cpu_percent': cpu_percent,
-                'memory_percent': memory_percent,
-                'cpu_temperature': cpu_temp,
-                'hostname': hostname,
-                'fps': self.camera.fps if self.camera._is_available else 0,
-                'camera_status': component_status.get('camera', False),
-                'motor_status': component_status.get('motor', False),
-                'ultrasonic_status': component_status.get('ultrasonic', False),
-                'current_resolution': self.camera.get_current_resolution() if self.camera._is_available else 'N/A',
-            }
-        except Exception as e:
-            return {'error': str(e)}
+    #-Cleanup-#
+    def cleanup(self):
+        self.motor.cleanup()
+        self.camera.cleanup()
+        self.ultrasonic.cleanup()
+        logger.info("프로그램이 정상적으로 종료되었습니다.")
+# endregion
 
     #-Motor Class Definition-#
     class Motor:
-        def __init__(self, parent_instance):
-            self.parent = parent_instance
-            #-Class Usability-#
-            self._is_available = False
+        def __init__(self, safe_mode: bool = False):
+            #-Class Variables-#
+            self.safe_mode: bool = safe_mode
+            self._is_available: bool = False
 
-            #-Left Wheel GPIO Pins-#
-            self.IN3 = 22  # 왼쪽 모터 방향 1
-            self.IN4 = 27  # 왼쪽 모터 방향 2
-            self.ENB = 13  # 왼쪽 모터 PWM
-
-            #-Right Wheel GPIO Pins-#
-            self.IN1 = 23  # 오른쪽 모터 방향 1
-            self.IN2 = 24  # 오른쪽 모터 방향 2
-            self.ENA = 12  # 오른쪽 모터 PWM
+            #-Motor GPIO-#
+            self.IN1: int = 23 # Right Motor Direction 1
+            self.IN2: int = 24 # Right Motor Direction 2
+            self.ENA: int = 12 # Right Motor PWM
+            self.IN3: int = 22 # Left Motor Direction 1
+            self.IN4: int = 27 # Left Motor Direction 2
+            self.ENB: int = 13  # Left Motor PWM
 
             try:
                 #-GPIO Setup-#
-                self.chan_list = [self.IN1, self.IN2, self.IN3, self.IN4, self.ENA, self.ENB]
-                GPIO.setup(self.chan_list, GPIO.OUT, initial=GPIO.LOW)
+                chan_list = [self.IN1, self.IN2, self.ENA, self.IN3, self.IN4, self.ENB]
+                GPIO.setup(chan_list, GPIO.OUT, initial=GPIO.LOW)
 
                 #-PWM Setup-#
                 self.rightPWM = GPIO.PWM(self.ENA, 1000); self.rightPWM.start(0)
                 self.leftPWM = GPIO.PWM(self.ENB, 1000); self.leftPWM.start(0)
             except Exception as e:
-                if self.parent.safe_mode:
-                    logger.warning(f"[Safe Mode] 모터 초기화에 실패했습니다. 모터 관련 함수를 사용할 수 없습니다. {e}")
+                if self.safe_mode:
                     self._is_available = False
+                    logger.warning(LogMessage.motor_init_failure_safe_mode)
                 else:
-                    logger.error(f"모터 초기화에 실패했습니다. 프로그램을 종료합니다. {e}")
+                    logger.error(LogMessage.motor_init_failure)
                     sys.exit(1)
             else:
-                logger.info("모터 초기화 성공!")
+                logger.info(LogMessage.motor_init_success)
                 self._is_available = True
 
             #-Motor Parameter-#
@@ -236,33 +235,33 @@ class Findee:
 
         #-Derived Motor Control Method-#
         # Straight, Backward
-        def move_forward(self, speed : float, time_sec : float = None):
+        def move_forward(self, speed : float, time_sec : Optional[float] = None):
             self.control_motors(speed, speed)
             if time_sec is not None:
                 time.sleep(time_sec)
                 self.stop()
 
-        def move_backward(self, speed : float, time_sec : float = None):
+        def move_backward(self, speed : float, time_sec : Optional[float] = None):
             self.control_motors(-speed, -speed)
             if time_sec is not None:
                 time.sleep(time_sec)
                 self.stop()
 
         # Rotation
-        def turn_left(self, speed : float, time_sec : float = None):
+        def turn_left(self, speed : float, time_sec : Optional[float] = None):
             self.control_motors(speed, -speed)
             if time_sec is not None:
                 time.sleep(time_sec)
                 self.stop()
 
-        def turn_right(self, speed : float, time_sec : float = None):
+        def turn_right(self, speed : float, time_sec : Optional[float] = None):
             self.control_motors(-speed, speed)
             if time_sec is not None:
                 time.sleep(time_sec)
                 self.stop()
 
         # Curvilinear Rotation
-        def curve_left(self, speed : float, angle : int, time_sec : float = None):
+        def curve_left(self, speed : float, angle : int, time_sec : Optional[float] = None):
             angle = self.constrain(angle, 0, 60)
             ratio = 1.0 - (angle / 60.0) * 0.5
             self.control_motors(speed, speed * ratio)
@@ -270,7 +269,7 @@ class Findee:
                 time.sleep(time_sec)
                 self.stop()
 
-        def curve_right(self, speed : float, angle : int, time_sec : float = None):
+        def curve_right(self, speed : float, angle : int, time_sec : Optional[float] = None):
             angle = self.constrain(angle, 0, 60)
             ratio = 1.0 - (angle / 60.0) * 0.5
             self.control_motors(speed * ratio, speed)
@@ -291,11 +290,9 @@ class Findee:
 
     #-Camera Class Definition-#
     class Camera:
-        def __init__(self, parent_instance, camera_resolution: tuple[int, int] = (640, 480)):
-            # Parent Instance
-            self.parent = parent_instance
-
-            # Class Usability
+        def __init__(self, safe_mode: bool = False, camera_resolution: tuple[int, int] = (640, 480)):
+            #-Class Variables-#
+            self.safe_mode = safe_mode
             self._is_available = False
 
             # Camera Object
@@ -326,7 +323,7 @@ class Findee:
                 self.picam2.configure("preview")
                 self.picam2.start()
             except Exception as e:
-                if self.parent.safe_mode:
+                if self.safe_mode:
                     logger.warning(f"[Safe Mode] 카메라 초기화에 실패했습니다. 카메라 관련 함수를 사용할 수 없습니다. {e}")
                     self._is_available = False
                 else:
@@ -469,11 +466,9 @@ class Findee:
 
     #-Ultrasonic Class Definition-#
     class Ultrasonic:
-        def __init__(self, parent_instance):
-            # Parent Instance
-            self.parent = parent_instance
-
-            # Class Usability
+        def __init__(self, safe_mode: bool = False):
+            #-Class Variables-#
+            self.safe_mode = safe_mode
             self._is_available = False
 
             # GPIO Pin Number
@@ -484,14 +479,14 @@ class Findee:
             self.SOUND_SPEED = 34300
             self.TRIGGER_PULSE = 0.00001 # 10us
             self.TIMEOUT = 0.03 # 30ms
-            self.last_distance: float | None = None
+            self.last_distance: Optional[float] = None
 
             try:
                 # GPIO Pin Setting
                 GPIO.setup(self.TRIG, GPIO.OUT, initial=GPIO.LOW)
                 GPIO.setup(self.ECHO, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
             except Exception as e:
-                if self.parent.safe_mode:
+                if self.safe_mode:
                     logger.warning(f"[Safe Mode] 초음파 센서 초기화에 실패했습니다. 초음파 센서 관련 함수를 사용할 수 없습니다. {e}")
                     self._is_available = False
                 else:
@@ -502,11 +497,11 @@ class Findee:
                 self._is_available = True
 
         #-Get Last Distance from Ultrasonic Sensor-#
-        def get_last_distance(self) -> float | None:
+        def get_last_distance(self) -> Optional[float]:
             return self.last_distance
 
         #-Get Distance from Ultrasonic Sensor-#
-        def get_distance(self) -> float | None:
+        def get_distance(self) -> Optional[float]:
             if not self._is_available:
                 logger.warning("초음파 센서가 비활성화 상태입니다.")
                 return None
@@ -535,8 +530,6 @@ class Findee:
 
                 end_time = time.time()
 
-                #r = GPIO.wait_for_edge(self.ECHO, GPIO.FALLING, timeout=self.TIMEOUT)
-
                 if is_timeout:
                     # Timeout
                     return None
@@ -556,13 +549,8 @@ class Findee:
             if self._is_available:
                 GPIO.cleanup((self.TRIG, self.ECHO))
                 logger.info("초음파 정리 완료!")
+# endregion
 
-    #-Cleanup-#
-    def cleanup(self):
-        self.motor.cleanup()
-        self.camera.cleanup()
-        self.ultrasonic.cleanup()
-        logger.info("프로그램이 정상적으로 종료되었습니다.")
 
 if __name__ == "__main__":
     robot = Findee()
