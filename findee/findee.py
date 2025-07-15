@@ -12,7 +12,6 @@ from typing import Optional
 from dataclasses import dataclass
 from pydantic import BaseModel
 
-
 if __name__ == "__main__": from util import FindeeFormatter, LogMessage
 else:from .util import FindeeFormatter, LogMessage
 
@@ -40,7 +39,7 @@ class CameraStatus(BaseModel):
 class SystemInfo(BaseModel):
     hostname: str  = "Unknown"
     cpu_percent: float = 0.0
-    num_cpu_cores: int = 0
+    num_cpu_cores: int = 1
     cpu_cores_percent: list[float] = []
     cpu_temperature: float = 0.0
     memory_percent: float = 0.0
@@ -110,6 +109,7 @@ class Findee:
             self.ultrasonic = self.Ultrasonic(safe_mode)
 
             # Class Variables
+            self.is_system_updating = False
             if platform != "linux":
                 self.system_info = SystemInfo(hostname="Unknown", num_cpu_cores=psutil.cpu_count(logical=False))
             else:
@@ -118,9 +118,9 @@ class Findee:
             self.update_system_info()
             self.status = Status(
                 safe_mode = safe_mode,
-                motor_status = self.motor._is_available,
-                camera_status = self.camera._is_available,
-                ultrasonic_status = self.ultrasonic._is_available
+                motor_status = self.motor._is_available if not DEBUG else True,
+                camera_status = self.camera._is_available if not DEBUG else True,
+                ultrasonic_status = self.ultrasonic._is_available if not DEBUG else True
             )
 
             #-Cleanup-#
@@ -148,8 +148,10 @@ class Findee:
                     self.system_info.cpu_temperature = 0.0
                 time.sleep(1)
 
-        threading.Thread(target=_update_cpu, daemon=True).start()
-        threading.Thread(target=_update_memory_temp, daemon=True).start()
+        if not self.is_system_updating:
+            self.is_system_updating = True
+            threading.Thread(target=_update_cpu, daemon=True).start()
+            threading.Thread(target=_update_memory_temp, daemon=True).start()
 
     def get_system_info(self) -> dict:
         return self.system_info.model_dump()
@@ -187,8 +189,8 @@ class Findee:
             try:
                 if DEBUG: raise Exception(LogMessage.warning_debug_mode)
                 #-GPIO Setup-#
-                chan_list = [self.IN1, self.IN2, self.ENA, self.IN3, self.IN4, self.ENB]
-                GPIO.setup(chan_list, GPIO.OUT, initial=GPIO.LOW)
+                self.chan_list = [self.IN1, self.IN2, self.ENA, self.IN3, self.IN4, self.ENB]
+                GPIO.setup(self.chan_list, GPIO.OUT, initial=GPIO.LOW)
 
                 #-PWM Setup-#
                 self.rightPWM = GPIO.PWM(self.ENA, 1000); self.rightPWM.start(0)
@@ -221,9 +223,8 @@ class Findee:
             return max(min(value, max_value), min_value)
 
         #-Basic Motor Control Method-#
-        def control_motors(self, right : float, left : float) -> bool:
+        def __control_motors(self, right : float, left : float, time_sec : Optional[float] = None) -> bool:
             if not self._is_available:
-                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command="모터 제어"))
                 return False
             try:
                 """
@@ -255,6 +256,10 @@ class Findee:
                     GPIO.output(self.IN3, GPIO.LOW if left > 0 else GPIO.HIGH) if not DEBUG else None
                     time.sleep(0.02)
                     self.leftPWM.ChangeDutyCycle(abs(left))
+
+                if time_sec is not None:
+                    time.sleep(time_sec)
+                    self.stop()
             except Exception as e:
                 logger.warning(LogMessage.control_failure.format(object=self.object, error=e))
                 return False
@@ -264,50 +269,39 @@ class Findee:
         #-Derived Motor Control Method-#
         # Straight, Backward
         def move_forward(self, speed : float, time_sec : Optional[float] = None):
-            self.control_motors(speed, speed)
-            if time_sec is not None:
-                time.sleep(time_sec)
-                self.stop()
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.move_forward.__name__} : right={speed}, left={speed}, time={time_sec}"))
+            self.__control_motors(speed, speed, time_sec)
 
         def move_backward(self, speed : float, time_sec : Optional[float] = None):
-            self.control_motors(-speed, -speed)
-            if time_sec is not None:
-                time.sleep(time_sec)
-                self.stop()
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.move_backward.__name__} : right={speed}, left={speed}, time={time_sec}"))
+            self.__control_motors(-speed, -speed, time_sec)
 
         # Rotation
         def turn_left(self, speed : float, time_sec : Optional[float] = None):
-            self.control_motors(speed, -speed)
-            if time_sec is not None:
-                time.sleep(time_sec)
-                self.stop()
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.turn_left.__name__} : right={speed}, left={speed}, time={time_sec}"))
+            self.__control_motors(speed, -speed, time_sec)
 
         def turn_right(self, speed : float, time_sec : Optional[float] = None):
-            self.control_motors(-speed, speed)
-            if time_sec is not None:
-                time.sleep(time_sec)
-                self.stop()
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.turn_right.__name__} : right={speed}, left={speed}, time={time_sec}"))
+            self.__control_motors(-speed, speed, time_sec)
 
         # Curvilinear Rotation
         def curve_left(self, speed : float, angle : int, time_sec : Optional[float] = None):
             angle = self.constrain(angle, 0, 60)
             ratio = 1.0 - (angle / 60.0) * 0.5
-            self.control_motors(speed, speed * ratio)
-            if time_sec is not None:
-                time.sleep(time_sec)
-                self.stop()
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.curve_left.__name__} : speed={speed}, angle={angle}, time={time_sec}"))
+            self.__control_motors(speed, speed * ratio, time_sec)
 
         def curve_right(self, speed : float, angle : int, time_sec : Optional[float] = None):
             angle = self.constrain(angle, 0, 60)
             ratio = 1.0 - (angle / 60.0) * 0.5
-            self.control_motors(speed * ratio, speed)
-            if time_sec is not None:
-                time.sleep(time_sec)
-                self.stop()
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.curve_right.__name__} : speed={speed}, angle={angle}, time={time_sec}"))
+            self.__control_motors(speed * ratio, speed, time_sec)
 
         #-Stop & Cleanup-#
         def stop(self):
-            self.control_motors(0.0, 0.0)
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.stop.__name__}"))
+            self.__control_motors(0.0, 0.0, None)
 
         def cleanup(self):
             if self._is_available:
@@ -335,7 +329,6 @@ class Findee:
             self.fps = 0
             self.frame_count = 0
             self.last_fps_time = time.time()
-
             self.available_resolutions = [
                 {'label': '320x240 (QVGA)', 'value': '320x240', 'width': 320, 'height': 240},
                 {'label': '640x480 (VGA)', 'value': '640x480', 'width': 640, 'height': 480},
@@ -344,6 +337,7 @@ class Findee:
                 {'label': '1280x720 (HD)', 'value': '1280x720', 'width': 1280, 'height': 720},
                 {'label': '1920x1080 (FHD)', 'value': '1920x1080', 'width': 1920, 'height': 1080}
             ]
+            self._capture_thread = None
 
             try:
                 if DEBUG: raise Exception(LogMessage.warning_debug_mode)
@@ -365,25 +359,26 @@ class Findee:
                 logger.info(LogMessage.init_success.format(object=self.object))
                 self._is_available = True
 
-        # TODO: 카메라 해상도 설정 함수 구현
-        # TODO: OpenCV 필터링 등 간단한 함수 구현
-
         #-Get Frame from Camera-#
-        def get_frame(self) -> np.ndarray | None:
+        def get_frame(self) -> Optional[np.ndarray]:
             if not self._is_available:
-                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command="프레임 캡처"))
+                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.get_frame.__name__}"))
                 return None
-
             try:
-                frame = self.picam2.capture_array()
-                return frame
+                return self.picam2.capture_array()
             except Exception as e:
                 logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                 return None
 
-        def start_frame_capture(self):
-            """별도 스레드에서 프레임 캡처 시작"""
+        def start_frame_capture(self, frame_rate: int = 30):
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.start_frame_capture.__name__} : frame_rate={frame_rate}"))
+
+            if self._capture_thread and self._capture_thread.is_alive():
+                logger.info(LogMessage.camera_frame_capture_already_running)
+                return
+
             def capture_loop():
+                interval = 1.0 / frame_rate
                 while self._is_available:
                     try:
                         frame = self.get_frame()
@@ -391,47 +386,42 @@ class Findee:
                             with self.frame_lock:
                                 self.current_frame = frame.copy()
 
-                            # FPS 계산
                             self.frame_count += 1
-                            current_time = time.time()
-                            if current_time - self.last_fps_time >= 1.0:
+                            now = time.time()
+                            if now - self.last_fps_time >= 1.0:
                                 self.fps = self.frame_count
                                 self.frame_count = 0
-                                self.last_fps_time = current_time
+                                self.last_fps_time = now
 
-                        time.sleep(0.033)  # ~30 FPS
+                        time.sleep(interval)
                     except Exception as e:
                         logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                         time.sleep(0.1)
-                        continue
 
-            capture_thread = threading.Thread(target=capture_loop, daemon=True)
-            capture_thread.start()
+            self._capture_thread = threading.Thread(target=capture_loop, daemon=True)
+            self._capture_thread.start()
 
-        def generate_frames(self):
-            """MJPEG 프레임 생성 (Flask 스트리밍용)"""
+        def generate_frames(self, quality: int = 85):
+            """Flask 스트리밍을 위한 MJPEG 프레임 생성기"""
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.generate_frames.__name__} : quality={quality}"))
             while self._is_available:
                 try:
                     with self.frame_lock:
-                        if self.current_frame is not None:
-                            frame = self.current_frame.copy()
-                        else:
-                            # 기본 프레임 생성 (카메라 연결 대기 중)
-                            frame = self.create_placeholder_frame()
+                        frame = self.current_frame.copy() if self.current_frame is not None else self.create_placeholder_frame()
 
-                    # JPEG로 인코딩
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
-                    if ret:
-                        frame_bytes = buffer.tobytes()
-                        yield (b'--frame\r\n'
-                            b'Content-Type: image/jpeg\r\n\r\n' + frame_bytes + b'\r\n')
+                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                    if not ret:
+                        logger.error(LogMessage.control_failure.format(object=self.object, error="JPEG 인코딩 실패"))
+                        continue
 
-                    time.sleep(0.033)  # ~30 FPS
+                    yield (b'--frame\r\n'
+                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+
+                    time.sleep(1.0 / 30.0)
 
                 except Exception as e:
                     logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                     time.sleep(0.1)
-                    continue
 
         def create_placeholder_frame(self):
             """카메라 연결 대기 중 표시할 플레이스홀더 프레임"""
@@ -448,19 +438,19 @@ class Findee:
             cv2.putText(frame, text, (text_x, text_y), font, 1, (255, 255, 255), 2)
             return frame
 
-        def configure_resolution(self, width : int, height : int):
+        def configure_resolution(self, resolution: tuple[int, int]):
             try:
                 if hasattr(self.parent, 'camera') and self.parent.camera._is_available:
                     previous_resolution = self.current_resolution
-                    self.current_resolution = (width, height)
+                    self.current_resolution = resolution
                     # picamera2 해상도 설정
                     self.parent.camera.picam2.stop()
-                    self.parent.camera.picam2.preview_configuration.main.size = (width, height)
+                    self.parent.camera.picam2.preview_configuration.main.size = resolution
                     self.parent.camera.picam2.configure("preview")
                     self.parent.camera.picam2.start()
-                    logger.info(f"카메라 해상도가 변경되었습니다. {previous_resolution} -> {self.current_resolution}")
+                    logger.info(LogMessage.camera_resolution_change_success.format(previous_resolution=previous_resolution, new_resolution=self.current_resolution))
             except Exception as e:
-                logger.error(f"카메라 해상도 변경 중 오류가 발생하였습니다. {previous_resolution} -> {self.current_resolution}")
+                logger.error(LogMessage.camera_resolution_change_failure.format(error=e))
                 # 기본 해상도로 복구 시도
                 if self.current_resolution != (640, 480):
                     self.current_resolution = (640, 480)
@@ -468,9 +458,62 @@ class Findee:
                         self.parent.camera.picam2.preview_configuration.main.size = (640, 480)
                         self.parent.camera.picam2.configure("preview")
                         self.parent.camera.picam2.start()
-                        logger.info("기본 해상도로 복구 성공")
+                        logger.info(LogMessage.camera_resolution_restore_success)
                     except Exception as e:
-                        logger.error(f"기본 해상도 복구 실패: {e}")
+                        logger.error(LogMessage.camera_resolution_restore_failure.format(error=e))
+
+        def configure_resolution(self, resolution: tuple[int, int]):
+            """Picamera2의 해상도를 설정하고 실패 시 기본 해상도로 복원"""
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(
+                object=self.object,
+                command=f"{self.configure_resolution.__name__} : resolution={self.current_resolution}->{resolution}"
+            ))
+
+            if resolution == self.current_resolution:
+                return
+
+            if not (hasattr(self.parent, 'camera') and self.parent.camera._is_available):
+                logger.warning("카메라 사용 불가 상태")
+                return
+
+            cam = self.parent.camera.picam2
+            previous_resolution = self.current_resolution
+
+            try:
+                cam.stop()
+                time.sleep(0.05)  # 안정성 확보용
+                cam.preview_configuration.main.size = resolution
+                cam.configure("preview")
+                cam.start()
+
+                self.current_resolution = resolution
+                logger.info(LogMessage.camera_resolution_change_success.format(
+                    previous_resolution=previous_resolution,
+                    new_resolution=resolution
+                ))
+
+            except Exception as e:
+                logger.error(LogMessage.camera_resolution_change_failure.format(error=e))
+                self._restore_default_resolution()
+
+        def _restore_default_resolution(self):
+            """해상도 복구 시도"""
+            default_res = (640, 480)
+            if self.current_resolution == default_res:
+                return
+
+            try:
+                cam = self.parent.camera.picam2
+                cam.stop()
+                time.sleep(0.05)
+                cam.preview_configuration.main.size = default_res
+                cam.configure("preview")
+                cam.start()
+
+                self.current_resolution = default_res
+                logger.info(LogMessage.camera_resolution_restore_success)
+            except Exception as e:
+                logger.error(LogMessage.camera_resolution_restore_failure.format(error=e))
 
         def get_available_resolutions(self):
             """사용 가능한 해상도 목록 반환"""
@@ -589,8 +632,6 @@ class Findee:
 if __name__ == "__main__":
     robot = Findee()
     print(f"Hostname: {robot.get_hostname()}")
-    time.sleep(5)
     while True:
-        print(f"CPU Percent: {robot.get_system_info().get('cpu_percent')}")
-        print(f"CPU Core Percent: {robot.get_system_info().get('cpu_cores_percent')}")
-        time.sleep(0.2)
+        print(robot.camera.configure_resolution((1280, 720)))
+        time.sleep(1)

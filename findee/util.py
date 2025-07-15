@@ -104,13 +104,24 @@ class LogMessage:
     init_failure: str = "{object} 초기화 중 오류가 발생했습니다. 프로그램을 종료합니다. {error}"
     init_failure_in_safe_mode: str = "[Safe Mode] {object} 초기화 중 오류가 발생했습니다. {object} 관련 함수를 사용할 수 없습니다. {error}"
 
-    control_in_safe_mode: str = "[Safe Mode] 대상 : {object}, 명령 : {command}"
+    control_in_safe_mode: str = "[Safe Mode] [{object}] {command}"
     control_failure: str = "{object} 제어 중 오류가 발생했습니다. {error}"
 
     cleanup_success: str = "{object} 정리 완료!"
     cleanup_failure: str = "{object} 정리 중 오류가 발생했습니다. {error}"
 
     program_exit: str = "프로그램이 정상적으로 종료되었습니다."
+
+    #-Camera Messages-#
+    camera_frame_capture_start: str = "카메라 프레임 캡처 시작!"
+    camera_frame_capture_stop: str = "카메라 프레임 캡처 중단!"
+    camera_frame_capture_already_running: str = "카메라 프레임 캡처가 이미 실행 중입니다."
+    camera_frame_capture_failure: str = "카메라 프레임 캡처 중 오류가 발생했습니다. {error}"
+    camera_resolution_change_success: str = "카메라 해상도 변경 성공! {previous_resolution} -> {new_resolution}"
+    camera_resolution_change_failure: str = "카메라 해상도 변경 중 오류가 발생했습니다. {error}"
+    camera_resolution_restore_success: str = "기본 해상도로 복구 성공!"
+    camera_resolution_restore_failure: str = "기본 해상도로 복구 중 오류가 발생했습니다. {error}"
+
 
     #-System Info Messages-#
     excecuted_in_debug_mode: str = "프로그램이 디버그 모드로 실행되었습니다."
