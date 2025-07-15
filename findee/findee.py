@@ -9,9 +9,22 @@ import subprocess
 import psutil
 import threading
 from typing import Optional
-from .util import FindeeFormatter, LogMessage
 from dataclasses import dataclass
 from pydantic import BaseModel
+
+
+if __name__ == "__main__": from util import FindeeFormatter, LogMessage
+else:from .util import FindeeFormatter, LogMessage
+
+DEBUG = True if __name__ == "__main__" else False
+
+logger = FindeeFormatter().get_logger()
+logging.getLogger('picamera2').setLevel(logging.WARNING)
+
+if DEBUG:logger.info(LogMessage.excecuted_in_debug_mode)
+
+def exit_func():
+    sys.exit(0) if not DEBUG else logger.debug(LogMessage.exit_debug_mode)
 
 # region : Dataclass Definition
 class Status(BaseModel):
@@ -25,15 +38,19 @@ class CameraStatus(BaseModel):
     current_resolution: tuple[int, int]
 
 class SystemInfo(BaseModel):
-    hostname: str  = "0.0.0.0"
+    hostname: str  = "Unknown"
     cpu_percent: float = 0.0
+    num_cpu_cores: int = 0
     cpu_cores_percent: list[float] = []
     cpu_temperature: float = 0.0
     memory_percent: float = 0.0
-# endregion
 
-logger = FindeeFormatter().get_logger()
-logging.getLogger('picamera2').setLevel(logging.WARNING)
+@dataclass
+class Object:
+    motor: str = "모터"
+    camera: str = "카메라"
+    ultrasonic: str = "초음파 센서"
+# endregion
 
 # region : Check for uninstalled modules & Platform
 try:
@@ -71,7 +88,7 @@ try:
         raise Exception()
 except Exception as e:
     logger.error(LogMessage.module_import_failure.format(error=e))
-    sys.exit(1)
+    exit_func()
 else:
     logger.info(LogMessage.module_import_success)
 # endregion
@@ -81,10 +98,11 @@ class Findee:
     def __init__(self, safe_mode: bool = False, camera_resolution: tuple[int, int] = (640, 480)):
         try:
             logger.info(LogMessage.findee_init_start)
+            if DEBUG: safe_mode = True
 
             # GPIO Setting
-            GPIO.setwarnings(False)
-            GPIO.setmode(GPIO.BCM)
+            GPIO.setwarnings(False) if not DEBUG else None
+            GPIO.setmode(GPIO.BCM) if not DEBUG else None
 
             # Class Initialization
             self.motor = self.Motor(safe_mode)
@@ -92,7 +110,11 @@ class Findee:
             self.ultrasonic = self.Ultrasonic(safe_mode)
 
             # Class Variables
-            self.system_info = SystemInfo(hostname=subprocess.check_output(['hostname', '-I'], shell=False).decode().strip())
+            if platform != "linux":
+                self.system_info = SystemInfo(hostname="Unknown", num_cpu_cores=psutil.cpu_count(logical=False))
+            else:
+                self.system_info = SystemInfo(hostname=subprocess.check_output(['hostname', '-I'], shell=False).decode().strip())
+
             self.update_system_info()
             self.status = Status(
                 safe_mode = safe_mode,
@@ -105,17 +127,19 @@ class Findee:
             atexit.register(self.cleanup)
         except Exception as e:
             logger.error(LogMessage.findee_init_failure.format(error=e))
-            sys.exit(1)
+            exit_func()
         else:
             logger.info(LogMessage.findee_init_success)
             time.sleep(0.1)
-
 # region : Findee Class Methods
     def update_system_info(self):
-        def _update():
+        def _update_cpu():
             while True:
-                self.system_info.cpu_percent = psutil.cpu_percent(interval=0.1)
-                self.system_info.cpu_cores_percent = psutil.cpu_percent(interval=0.1, percpu=True)
+                self.system_info.cpu_cores_percent = psutil.cpu_percent(interval=1.0, percpu=True)
+                self.system_info.cpu_percent = round(sum(self.system_info.cpu_cores_percent) / self.system_info.num_cpu_cores, 2)
+
+        def _update_memory_temp():
+            while True:
                 self.system_info.memory_percent = psutil.virtual_memory().percent
                 try:
                     with open('/sys/class/thermal/thermal_zone0/temp', 'r') as f:
@@ -123,7 +147,9 @@ class Findee:
                 except FileNotFoundError:
                     self.system_info.cpu_temperature = 0.0
                 time.sleep(1)
-        threading.Thread(target=_update, daemon=True).start()
+
+        threading.Thread(target=_update_cpu, daemon=True).start()
+        threading.Thread(target=_update_memory_temp, daemon=True).start()
 
     def get_system_info(self) -> dict:
         return self.system_info.model_dump()
@@ -139,7 +165,7 @@ class Findee:
         self.motor.cleanup()
         self.camera.cleanup()
         self.ultrasonic.cleanup()
-        logger.info("프로그램이 정상적으로 종료되었습니다.")
+        logger.info(LogMessage.program_exit)
 # endregion
 
     #-Motor Class Definition-#
@@ -148,6 +174,7 @@ class Findee:
             #-Class Variables-#
             self.safe_mode: bool = safe_mode
             self._is_available: bool = False
+            self.object = Object.motor
 
             #-Motor GPIO-#
             self.IN1: int = 23 # Right Motor Direction 1
@@ -158,6 +185,7 @@ class Findee:
             self.ENB: int = 13  # Left Motor PWM
 
             try:
+                if DEBUG: raise Exception(LogMessage.warning_debug_mode)
                 #-GPIO Setup-#
                 chan_list = [self.IN1, self.IN2, self.ENA, self.IN3, self.IN4, self.ENB]
                 GPIO.setup(chan_list, GPIO.OUT, initial=GPIO.LOW)
@@ -168,12 +196,12 @@ class Findee:
             except Exception as e:
                 if self.safe_mode:
                     self._is_available = False
-                    logger.warning(LogMessage.motor_init_failure_safe_mode)
+                    logger.warning(LogMessage.init_failure_in_safe_mode.format(object=self.object, error=e))
                 else:
-                    logger.error(LogMessage.motor_init_failure)
-                    sys.exit(1)
+                    logger.error(LogMessage.init_failure.format(object=self.object, error=e))
+                    exit_func()
             else:
-                logger.info(LogMessage.motor_init_success)
+                logger.info(LogMessage.init_success.format(object=self.object))
                 self._is_available = True
 
             #-Motor Parameter-#
@@ -195,7 +223,7 @@ class Findee:
         #-Basic Motor Control Method-#
         def control_motors(self, right : float, left : float) -> bool:
             if not self._is_available:
-                logger.warning("모터가 비활성화 상태입니다.")
+                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command="모터 제어"))
                 return False
             try:
                 """
@@ -205,30 +233,30 @@ class Findee:
                 #-Right Motor Control-#
                 if right == 0.0:
                     self.rightPWM.ChangeDutyCycle(0.0)
-                    GPIO.output((self.IN1, self.IN2), GPIO.LOW)
+                    GPIO.output((self.IN1, self.IN2), GPIO.LOW) if not DEBUG else None
                 else:
                     right = (1 if right >= 0 else -1) * self.constrain(abs(right), 20, 100)
                     self.rightPWM.ChangeDutyCycle(100.0) # 100% for strong torque at first time
                     # OUT1(HIGH) -> OUT2(LOW) : Forward
-                    GPIO.output(self.IN1, GPIO.HIGH if right > 0 else GPIO.LOW)
-                    GPIO.output(self.IN2, GPIO.LOW if right > 0 else GPIO.HIGH)
+                    GPIO.output(self.IN1, GPIO.HIGH if right > 0 else GPIO.LOW) if not DEBUG else None
+                    GPIO.output(self.IN2, GPIO.LOW if right > 0 else GPIO.HIGH) if not DEBUG else None
                     time.sleep(0.02)
                     self.rightPWM.ChangeDutyCycle(abs(right))
 
                 #-Left Motor Control-#
                 if left == 0.0:
                     self.leftPWM.ChangeDutyCycle(0.0)
-                    GPIO.output((self.IN3, self.IN4), GPIO.LOW)
+                    GPIO.output((self.IN3, self.IN4), GPIO.LOW) if not DEBUG else None
                 else:
                     left = (1 if left >= 0 else -1) * self.constrain(abs(left), 20, 100)
                     self.leftPWM.ChangeDutyCycle(100.0) # 100% for strong torque at first time
                     # OUT4(HIGH) -> OUT3(LOW) : Forward
-                    GPIO.output(self.IN4, GPIO.HIGH if left > 0 else GPIO.LOW)
-                    GPIO.output(self.IN3, GPIO.LOW if left > 0 else GPIO.HIGH)
+                    GPIO.output(self.IN4, GPIO.HIGH if left > 0 else GPIO.LOW) if not DEBUG else None
+                    GPIO.output(self.IN3, GPIO.LOW if left > 0 else GPIO.HIGH) if not DEBUG else None
                     time.sleep(0.02)
                     self.leftPWM.ChangeDutyCycle(abs(left))
             except Exception as e:
-                logger.warning(f"모터 제어 중 오류가 발생했습니다. {e}")
+                logger.warning(LogMessage.control_failure.format(object=self.object, error=e))
                 return False
             else:
                 return True
@@ -282,11 +310,12 @@ class Findee:
             self.control_motors(0.0, 0.0)
 
         def cleanup(self):
-            #self.stop()
-            self.rightPWM.stop()
-            self.leftPWM.stop()
-            GPIO.cleanup(self.chan_list)
-            logger.info("모터 정리 완료!")
+            if self._is_available:
+                self.stop()
+                self.rightPWM.stop() if not DEBUG else None
+                self.leftPWM.stop() if not DEBUG else None
+                GPIO.cleanup(self.chan_list) if not DEBUG else None
+                logger.info(LogMessage.cleanup_success.format(object=self.object))
 
     #-Camera Class Definition-#
     class Camera:
@@ -294,6 +323,7 @@ class Findee:
             #-Class Variables-#
             self.safe_mode = safe_mode
             self._is_available = False
+            self.object = Object.camera
 
             # Camera Object
             self.picam2 = None
@@ -316,6 +346,7 @@ class Findee:
             ]
 
             try:
+                if DEBUG: raise Exception(LogMessage.warning_debug_mode)
                 os.environ['LIBCAMERA_LOG_FILE'] = '/dev/null' # disable logging
                 self.picam2 = Picamera2()
                 self.picam2.preview_configuration.main.size = self.current_resolution
@@ -324,14 +355,14 @@ class Findee:
                 self.picam2.start()
             except Exception as e:
                 if self.safe_mode:
-                    logger.warning(f"[Safe Mode] 카메라 초기화에 실패했습니다. 카메라 관련 함수를 사용할 수 없습니다. {e}")
+                    logger.warning(LogMessage.init_failure_in_safe_mode.format(object=self.object, error=e))
                     self._is_available = False
                 else:
-                    logger.error(f"카메라 초기화에 실패했습니다. 프로그램을 종료합니다. {e}")
-                    sys.exit(1)
+                    logger.error(LogMessage.init_failure.format(object=self.object, error=e))
+                    exit_func()
             else:
                 os.environ['LIBCAMERA_LOG_FILE'] = '' # restore logging
-                logger.info("카메라 초기화 성공!")
+                logger.info(LogMessage.init_success.format(object=self.object))
                 self._is_available = True
 
         # TODO: 카메라 해상도 설정 함수 구현
@@ -340,14 +371,14 @@ class Findee:
         #-Get Frame from Camera-#
         def get_frame(self) -> np.ndarray | None:
             if not self._is_available:
-                logger.warning("카메라가 비활성화 상태입니다.")
+                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command="프레임 캡처"))
                 return None
 
             try:
                 frame = self.picam2.capture_array()
                 return frame
             except Exception as e:
-                logger.error(f"프레임 캡처 중 오류가 발생했습니다: {e}")
+                logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                 return None
 
         def start_frame_capture(self):
@@ -370,7 +401,7 @@ class Findee:
 
                         time.sleep(0.033)  # ~30 FPS
                     except Exception as e:
-                        print(f"프레임 캡처 오류: {e}")
+                        logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                         time.sleep(0.1)
                         continue
 
@@ -398,7 +429,7 @@ class Findee:
                     time.sleep(0.033)  # ~30 FPS
 
                 except Exception as e:
-                    print(f"프레임 생성 오류: {e}")
+                    logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                     time.sleep(0.1)
                     continue
 
@@ -456,9 +487,9 @@ class Findee:
                 if hasattr(self, 'picam2') and self.picam2 is not None:
                     self.picam2.stop()
                     del self.picam2
-                    logger.info("카메라 정리 완료!")
+                    logger.info(LogMessage.cleanup_success.format(object=self.object))
             except Exception as e:
-                logger.error(f"카메라 정리 중 오류가 발생했습니다: {e}")
+                logger.error(LogMessage.cleanup_failure.format(object=self.object, error=e))
             finally:
                 # 정리 후 상태 초기화
                 self.picam2 = None
@@ -470,6 +501,7 @@ class Findee:
             #-Class Variables-#
             self.safe_mode = safe_mode
             self._is_available = False
+            self.object = Object.ultrasonic
 
             # GPIO Pin Number
             self.TRIG = 5
@@ -482,18 +514,20 @@ class Findee:
             self.last_distance: Optional[float] = None
 
             try:
+                if DEBUG: raise Exception(LogMessage.warning_debug_mode)
+
                 # GPIO Pin Setting
                 GPIO.setup(self.TRIG, GPIO.OUT, initial=GPIO.LOW)
                 GPIO.setup(self.ECHO, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
             except Exception as e:
                 if self.safe_mode:
-                    logger.warning(f"[Safe Mode] 초음파 센서 초기화에 실패했습니다. 초음파 센서 관련 함수를 사용할 수 없습니다. {e}")
+                    logger.warning(LogMessage.init_failure_in_safe_mode.format(object=self.object, error=e))
                     self._is_available = False
                 else:
-                    logger.error(f"초음파 센서 초기화에 실패했습니다. 프로그램을 종료합니다. {e}")
-                    sys.exit(1)
+                    logger.error(LogMessage.init_failure.format(object=self.object, error=e))
+                    exit_func()
             else:
-                logger.info("초음파 센서 초기화 성공!")
+                logger.info(LogMessage.init_success.format(object=self.object))
                 self._is_available = True
 
         #-Get Last Distance from Ultrasonic Sensor-#
@@ -503,7 +537,7 @@ class Findee:
         #-Get Distance from Ultrasonic Sensor-#
         def get_distance(self) -> Optional[float]:
             if not self._is_available:
-                logger.warning("초음파 센서가 비활성화 상태입니다.")
+                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command="거리 측정"))
                 return None
 
             try:
@@ -541,17 +575,22 @@ class Findee:
                     #print(f"start_time: {start_time}, end_time: {end_time}, duration: {duration}, distance: {distance}")
                     return round(distance, 1)
             except Exception as e:
-                logger.error(f"초음파 센서 측정 중 오류가 발생했습니다: {e}")
+                logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                 return None
 
         #-Cleanup-#
         def cleanup(self):
             if self._is_available:
                 GPIO.cleanup((self.TRIG, self.ECHO))
-                logger.info("초음파 정리 완료!")
+                logger.info(LogMessage.cleanup_success.format(object=self.object))
 # endregion
 
 
 if __name__ == "__main__":
     robot = Findee()
-    print(robot.ip)
+    print(f"Hostname: {robot.get_hostname()}")
+    time.sleep(5)
+    while True:
+        print(f"CPU Percent: {robot.get_system_info().get('cpu_percent')}")
+        print(f"CPU Core Percent: {robot.get_system_info().get('cpu_cores_percent')}")
+        time.sleep(0.2)

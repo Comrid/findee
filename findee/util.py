@@ -93,26 +93,26 @@ class LogMessage:
     findee_init_success: str = "Findee 클래스 초기화 성공!"
     findee_init_failure: str = "Findee 클래스 초기화 중 오류가 발생했습니다. 프로그램을 종료합니다. {error}"
 
-    #-Motor Messages-#
-    motor_init_success: str = "모터 초기화 성공!"
-    motor_init_failure: str = "모터 초기화에 실패했습니다. 프로그램을 종료합니다."
-    motor_init_failure_safe_mode: str = "[Safe Mode] 모터 초기화에 실패했습니다. 모터 관련 함수를 사용할 수 없습니다."
-    motor_control_on_safe_mode: str = "모터가 비활성화 상태입니다."
-    motor_control_failure: str = "모터 제어 중 오류가 발생했습니다."
-    motor_cleanup_success: str = "모터 정리 완료!"
+    #-General Messages-#
+    """
+    {object} : 객체 이름(모터, 카메라, 초음파 센서)
+    {command} : 명령
+    {error} : 오류 메시지
+    """
+    init_start: str = "{object} 초기화 시작!"
+    init_success: str = "{object} 초기화 성공!"
+    init_failure: str = "{object} 초기화 중 오류가 발생했습니다. 프로그램을 종료합니다. {error}"
+    init_failure_in_safe_mode: str = "[Safe Mode] {object} 초기화 중 오류가 발생했습니다. {object} 관련 함수를 사용할 수 없습니다. {error}"
 
-    #-Camera Messages-#
-    camera_init_success: str = "카메라 초기화 성공!"
-    camera_init_failure: str = "카메라 초기화에 실패했습니다. 프로그램을 종료합니다."
-    camera_init_failure_safe_mode: str = "[Safe Mode] 카메라 초기화에 실패했습니다. 카메라 관련 함수를 사용할 수 없습니다."
-    camera_control_on_safe_mode: str = "카메라가 비활성화 상태입니다."
-    camera_control_failure: str = "카메라 제어 중 오류가 발생했습니다."
-    camera_cleanup_success: str = "카메라 정리 완료!"
+    control_in_safe_mode: str = "[Safe Mode] 대상 : {object}, 명령 : {command}"
+    control_failure: str = "{object} 제어 중 오류가 발생했습니다. {error}"
 
-    #-Ultrasonic Messages-#
-    ultrasonic_init_success: str = "초음파 센서 초기화 성공!"
-    ultrasonic_init_failure: str = "초음파 센서 초기화에 실패했습니다. 프로그램을 종료합니다."
-    ultrasonic_init_failure_safe_mode: str = "[Safe Mode] 초음파 센서 초기화에 실패했습니다. 초음파 센서 관련 함수를 사용할 수 없습니다."
-    ultrasonic_control_on_safe_mode: str = "초음파 센서가 비활성화 상태입니다."
-    ultrasonic_control_failure: str = "초음파 센서 제어 중 오류가 발생했습니다."
-    ultrasonic_cleanup_success: str = "초음파 센서 정리 완료!"
+    cleanup_success: str = "{object} 정리 완료!"
+    cleanup_failure: str = "{object} 정리 중 오류가 발생했습니다. {error}"
+
+    program_exit: str = "프로그램이 정상적으로 종료되었습니다."
+
+    #-System Info Messages-#
+    excecuted_in_debug_mode: str = "프로그램이 디버그 모드로 실행되었습니다."
+    exit_debug_mode: str = "여기서 원래 프로그램이 종료됩니다."
+    warning_debug_mode: str = "DEBUG MODE"
