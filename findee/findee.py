@@ -13,9 +13,9 @@ from dataclasses import dataclass
 from pydantic import BaseModel
 
 if __name__ == "__main__": from util import FindeeFormatter, LogMessage
-else:from .util import FindeeFormatter, LogMessage
+else: from .util import FindeeFormatter, LogMessage
 
-DEBUG = True if __name__ == "__main__" else False
+DEBUG = True #if __name__ == "__main__" else False
 
 logger = FindeeFormatter().get_logger()
 logging.getLogger('picamera2').setLevel(logging.WARNING)
@@ -31,10 +31,6 @@ class Status(BaseModel):
     motor_status: bool = False
     camera_status: bool = False
     ultrasonic_status: bool = False
-
-class CameraStatus(BaseModel):
-    fps: float
-    current_resolution: tuple[int, int]
 
 class SystemInfo(BaseModel):
     hostname: str  = "Unknown"
@@ -359,11 +355,14 @@ class Findee:
                 logger.info(LogMessage.init_success.format(object=self.object))
                 self._is_available = True
 
+        def get_fps(self) -> float:
+            return self.fps
+
         #-Get Frame from Camera-#
         def get_frame(self) -> Optional[np.ndarray]:
             if not self._is_available:
                 if DEBUG:
-                    gray_value = np.random.randint(0, 256, self.current_resolution, dtype=np.uint8)
+                    gray_value = np.random.randint(0, 256, self.current_resolution, dtype=np.uint8).T
                     return np.stack([gray_value, gray_value, gray_value], axis=2)
                 logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.get_frame.__name__}"))
                 return None
@@ -422,7 +421,7 @@ class Findee:
         def generate_frames(self, quality: int = 85):
             """Flask 스트리밍을 위한 MJPEG 프레임 생성기"""
             if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.generate_frames.__name__} : quality={quality}"))
-            while self._is_available:
+            while self._is_available or DEBUG:
                 try:
                     with self.frame_lock:
                         frame = self.current_frame.copy() if self.current_frame is not None else self.create_placeholder_frame()

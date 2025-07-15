@@ -135,3 +135,4 @@ class LogMessage:
     excecuted_in_debug_mode: str = "프로그램이 디버그 모드로 실행되었습니다."
     exit_debug_mode: str = "여기서 원래 프로그램이 종료됩니다."
     warning_debug_mode: str = "DEBUG MODE"
+
