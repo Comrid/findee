@@ -115,6 +115,7 @@ class LogMessage:
     #-Camera Messages-#
     camera_frame_capture_start: str = "카메라 프레임 캡처 시작!"
     camera_frame_capture_stop: str = "카메라 프레임 캡처 중단!"
+    camera_frame_capture_start_in_debug_mode: str = "[DEBUG] 랜덤 그레이스케일 프레임 생성 시작!"
     camera_frame_capture_already_running: str = "카메라 프레임 캡처가 이미 실행 중입니다."
     camera_frame_capture_failure: str = "카메라 프레임 캡처 중 오류가 발생했습니다. {error}"
     camera_resolution_change_success: str = "카메라 해상도 변경 성공! {previous_resolution} -> {new_resolution}"
@@ -122,6 +123,13 @@ class LogMessage:
     camera_resolution_restore_success: str = "기본 해상도로 복구 성공!"
     camera_resolution_restore_failure: str = "기본 해상도로 복구 중 오류가 발생했습니다. {error}"
 
+    #-Ultrasonic Sensor Messages-#
+    ultrasonic_distance_measurement_start: str = "초음파 센서 거리 측정 시작!"
+    ultrasonic_distance_measurement_stop: str = "초음파 센서 거리 측정 중단!"
+    ultrasonic_distance_measurement_start_in_debug_mode: str = "[DEBUG] 랜덤 거리 측정 시작!"
+    ultrasonic_distance_measurement_already_running: str = "초음파 센서 거리 측정이 이미 실행 중입니다."
+    ultrasonic_distance_measurement_failure: str = "초음파 센서 거리 측정 중 오류가 발생했습니다. {error}"
+    ultrasonic_echo_timeout: str = "ECHO 핀을 읽을 수 없습니다. 초음파 센서의 ECHO 핀의 연결을 확인해주세요."
 
     #-System Info Messages-#
     excecuted_in_debug_mode: str = "프로그램이 디버그 모드로 실행되었습니다."

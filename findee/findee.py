@@ -362,6 +362,9 @@ class Findee:
         #-Get Frame from Camera-#
         def get_frame(self) -> Optional[np.ndarray]:
             if not self._is_available:
+                if DEBUG:
+                    gray_value = np.random.randint(0, 256, self.current_resolution, dtype=np.uint8)
+                    return np.stack([gray_value, gray_value, gray_value], axis=2)
                 logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.get_frame.__name__}"))
                 return None
             try:
@@ -371,7 +374,8 @@ class Findee:
                 return None
 
         def start_frame_capture(self, frame_rate: int = 30):
-            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.start_frame_capture.__name__} : frame_rate={frame_rate}"))
+            if DEBUG:
+                logger.warning(LogMessage.camera_frame_capture_start_in_debug_mode)
 
             if self._capture_thread and self._capture_thread.is_alive():
                 logger.info(LogMessage.camera_frame_capture_already_running)
@@ -379,9 +383,10 @@ class Findee:
 
             def capture_loop():
                 interval = 1.0 / frame_rate
-                while self._is_available:
+                while self._is_available or DEBUG:
                     try:
                         frame = self.get_frame()
+
                         if frame is not None:
                             with self.frame_lock:
                                 self.current_frame = frame.copy()
@@ -398,8 +403,21 @@ class Findee:
                         logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                         time.sleep(0.1)
 
+            self.current_frame = self.get_frame()
             self._capture_thread = threading.Thread(target=capture_loop, daemon=True)
             self._capture_thread.start()
+
+        def stop_frame_capture(self):
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.stop_frame_capture.__name__}"))
+
+            if self._capture_thread and self._capture_thread.is_alive():
+                self._capture_thread.join(timeout=2.0)
+                logger.info(LogMessage.camera_frame_capture_stop)
+
+            self._capture_thread = None
+            self.current_frame = None
+            self.fps = 0
+            self.frame_count = 0
 
         def generate_frames(self, quality: int = 85):
             """Flask 스트리밍을 위한 MJPEG 프레임 생성기"""
@@ -439,30 +457,6 @@ class Findee:
             return frame
 
         def configure_resolution(self, resolution: tuple[int, int]):
-            try:
-                if hasattr(self.parent, 'camera') and self.parent.camera._is_available:
-                    previous_resolution = self.current_resolution
-                    self.current_resolution = resolution
-                    # picamera2 해상도 설정
-                    self.parent.camera.picam2.stop()
-                    self.parent.camera.picam2.preview_configuration.main.size = resolution
-                    self.parent.camera.picam2.configure("preview")
-                    self.parent.camera.picam2.start()
-                    logger.info(LogMessage.camera_resolution_change_success.format(previous_resolution=previous_resolution, new_resolution=self.current_resolution))
-            except Exception as e:
-                logger.error(LogMessage.camera_resolution_change_failure.format(error=e))
-                # 기본 해상도로 복구 시도
-                if self.current_resolution != (640, 480):
-                    self.current_resolution = (640, 480)
-                    try:
-                        self.parent.camera.picam2.preview_configuration.main.size = (640, 480)
-                        self.parent.camera.picam2.configure("preview")
-                        self.parent.camera.picam2.start()
-                        logger.info(LogMessage.camera_resolution_restore_success)
-                    except Exception as e:
-                        logger.error(LogMessage.camera_resolution_restore_failure.format(error=e))
-
-        def configure_resolution(self, resolution: tuple[int, int]):
             """Picamera2의 해상도를 설정하고 실패 시 기본 해상도로 복원"""
             if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(
                 object=self.object,
@@ -472,11 +466,11 @@ class Findee:
             if resolution == self.current_resolution:
                 return
 
-            if not (hasattr(self.parent, 'camera') and self.parent.camera._is_available):
+            if not (hasattr(self, 'picam2') and self._is_available):
                 logger.warning("카메라 사용 불가 상태")
                 return
 
-            cam = self.parent.camera.picam2
+            cam = self.picam2
             previous_resolution = self.current_resolution
 
             try:
@@ -525,6 +519,7 @@ class Findee:
 
         #-Cleanup-#
         def cleanup(self):
+            self.stop_frame_capture()
             try:
                 # picam2 속성이 존재하고 None이 아닌 경우에만 정리
                 if hasattr(self, 'picam2') and self.picam2 is not None:
@@ -554,7 +549,8 @@ class Findee:
             self.SOUND_SPEED = 34300
             self.TRIGGER_PULSE = 0.00001 # 10us
             self.TIMEOUT = 0.03 # 30ms
-            self.last_distance: Optional[float] = None
+            self._last_distance: Optional[float] = None
+            self._distance_measurement_thread = None
 
             try:
                 if DEBUG: raise Exception(LogMessage.warning_debug_mode)
@@ -575,12 +571,14 @@ class Findee:
 
         #-Get Last Distance from Ultrasonic Sensor-#
         def get_last_distance(self) -> Optional[float]:
-            return self.last_distance
+            return self._last_distance
 
         #-Get Distance from Ultrasonic Sensor-#
         def get_distance(self) -> Optional[float]:
             if not self._is_available:
-                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command="거리 측정"))
+                if DEBUG:
+                    return np.round(np.random.uniform(1, 10), 1)
+                logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.get_distance.__name__}"))
                 return None
 
             try:
@@ -593,7 +591,7 @@ class Findee:
                 loop_start_time = time.time()
                 while GPIO.input(self.ECHO) is not GPIO.HIGH:
                     if time.time() - loop_start_time > 0.1:
-                        logger.warning("ECHO 핀을 읽을 수 없습니다. 초음파 센서의 ECHO 핀의 연결을 확인해주세요.")
+                        logger.warning(LogMessage.ultrasonic_echo_timeout)
                         return None
 
                 start_time = time.time()
@@ -614,17 +612,50 @@ class Findee:
                     # Measure Success
                     duration = end_time - start_time
                     distance = (duration * self.SOUND_SPEED) / 2
-                    self.last_distance = distance
-                    #print(f"start_time: {start_time}, end_time: {end_time}, duration: {duration}, distance: {distance}")
+                    self._last_distance = distance
                     return round(distance, 1)
             except Exception as e:
                 logger.error(LogMessage.control_failure.format(object=self.object, error=e))
                 return None
 
+        def start_distance_measurement(self, interval: float = 0.1):
+            if DEBUG: logger.warning(LogMessage.ultrasonic_distance_measurement_start_in_debug_mode)
+
+            if self._distance_measurement_thread and self._distance_measurement_thread.is_alive():
+                logger.info(LogMessage.ultrasonic_distance_measurement_already_running)
+                return
+
+            def distance_measurement_loop():
+                while self._is_available or DEBUG:
+                    try:
+                        distance = self.get_distance()
+
+                        if distance is not None:
+                            self._last_distance = distance
+                        time.sleep(interval)
+                    except Exception as e:
+                        logger.error(LogMessage.control_failure.format(object=self.object, error=e))
+                        time.sleep(interval // 2)
+
+            self._last_distance = self.get_distance()
+            self._distance_measurement_thread = threading.Thread(target=distance_measurement_loop, daemon=True)
+            self._distance_measurement_thread.start()
+
+        def stop_distance_measurement(self):
+            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.stop_distance_measurement.__name__}"))
+
+            if self._distance_measurement_thread and self._distance_measurement_thread.is_alive():
+                self._distance_measurement_thread.join(timeout=2.0)
+                logger.info(LogMessage.ultrasonic_distance_measurement_stop)
+
+            self._distance_measurement_thread = None
+            self._last_distance = None
+
         #-Cleanup-#
         def cleanup(self):
+            self.stop_distance_measurement()
             if self._is_available:
-                GPIO.cleanup((self.TRIG, self.ECHO))
+                GPIO.cleanup((self.TRIG, self.ECHO)) if not DEBUG else None
                 logger.info(LogMessage.cleanup_success.format(object=self.object))
 # endregion
 
@@ -632,6 +663,7 @@ class Findee:
 if __name__ == "__main__":
     robot = Findee()
     print(f"Hostname: {robot.get_hostname()}")
+    robot.ultrasonic.start_distance_measurement(0.1)
     while True:
-        print(robot.camera.configure_resolution((1280, 720)))
-        time.sleep(1)
+        print(robot.ultrasonic.get_last_distance())
+        time.sleep(0.05)
