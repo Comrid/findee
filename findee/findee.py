@@ -33,7 +33,7 @@ class Status(BaseModel):
     ultrasonic_status: bool = False
 
 class SystemInfo(BaseModel):
-    hostname: str  = "Unknown"
+    hostname: str  = "localhost"
     cpu_percent: float = 0.0
     num_cpu_cores: int = 1
     cpu_cores_percent: list[float] = []
@@ -107,7 +107,7 @@ class Findee:
             # Class Variables
             self.is_system_updating = False
             if platform != "linux":
-                self.system_info = SystemInfo(hostname="Unknown", num_cpu_cores=psutil.cpu_count(logical=False))
+                self.system_info = SystemInfo(num_cpu_cores=psutil.cpu_count(logical=False))
             else:
                 self.system_info = SystemInfo(hostname=subprocess.check_output(['hostname', '-I'], shell=False).decode().strip())
 
@@ -362,7 +362,8 @@ class Findee:
         def get_frame(self) -> Optional[np.ndarray]:
             if not self._is_available:
                 if DEBUG:
-                    gray_value = np.random.randint(0, 256, self.current_resolution, dtype=np.uint8).T
+                    scaler = 10
+                    gray_value = np.random.randint(0, 256, (self.current_resolution[1] // scaler, self.current_resolution[0] // scaler), dtype=np.uint8)
                     return np.stack([gray_value, gray_value, gray_value], axis=2)
                 logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.get_frame.__name__}"))
                 return None
@@ -418,7 +419,7 @@ class Findee:
             self.fps = 0
             self.frame_count = 0
 
-        def generate_frames(self, quality: int = 85):
+        def generate_frames(self, quality: int = 95):
             """Flask 스트리밍을 위한 MJPEG 프레임 생성기"""
             if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.generate_frames.__name__} : quality={quality}"))
             while self._is_available or DEBUG:
@@ -426,7 +427,10 @@ class Findee:
                     with self.frame_lock:
                         frame = self.current_frame.copy() if self.current_frame is not None else self.create_placeholder_frame()
 
-                    ret, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                    ret, buffer = cv2.imencode('.jpg', frame,
+                                               [cv2.IMWRITE_JPEG_QUALITY, quality,
+                                               cv2.IMWRITE_JPEG_OPTIMIZE, 1]
+                                               )
                     if not ret:
                         logger.error(LogMessage.control_failure.format(object=self.object, error="JPEG 인코딩 실패"))
                         continue
@@ -457,10 +461,13 @@ class Findee:
 
         def configure_resolution(self, resolution: tuple[int, int]):
             """Picamera2의 해상도를 설정하고 실패 시 기본 해상도로 복원"""
-            if DEBUG: logger.warning(LogMessage.control_in_safe_mode.format(
+            if DEBUG:
+                logger.warning(LogMessage.control_in_safe_mode.format(
                 object=self.object,
                 command=f"{self.configure_resolution.__name__} : resolution={self.current_resolution}->{resolution}"
-            ))
+                ))
+                self.current_resolution = resolution
+                return
 
             if resolution == self.current_resolution:
                 return
@@ -576,7 +583,7 @@ class Findee:
         def get_distance(self) -> Optional[float]:
             if not self._is_available:
                 if DEBUG:
-                    return np.round(np.random.uniform(1, 10), 1)
+                    return (self._last_distance if self._last_distance is not None else 3) + np.round(np.random.uniform(-0.5, 0.5), 1)
                 logger.warning(LogMessage.control_in_safe_mode.format(object=self.object, command=f"{self.get_distance.__name__}"))
                 return None
 
